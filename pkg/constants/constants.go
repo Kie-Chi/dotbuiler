@@ -11,39 +11,74 @@ type PMTemplates struct {
 }
 
 var PMNeedsSudo = map[string]bool{
-    "apt-get": true,
-    "pacman":  true,
+	"apt-get": true, "apt": true,
+	"pacman":  true,
+	"dnf":     true, "yum": true,
+	"zypper":  true,
+	"apk":     true,
+	"snap":    true,
 }
 
 var SystemUpdateCmds = map[string]string{
-    "apt-get": "apt-get update",
-    "apt":     "apt update",
-    "pacman":  "pacman -Sy",
-    "apk":     "apk update",
-    "brew":    "brew update",
-    "dnf":     "dnf check-update",
-    "yum":     "yum check-update",
+	"apt-get": "apt-get update",
+	"apt":     "apt update",
+	"pacman":  "pacman -Sy",
+	"apk":     "apk update",
+	"brew":    "brew update",
+	"dnf":     "dnf check-update",
+	"yum":     "yum check-update",
+	"zypper":  "zypper refresh",
 }
 
 var BaseBatchTemplates = map[string]string{
-    "apt-get": "apt-get install -y {{names}}",
-    "pacman":  "pacman -S --noconfirm {{names}}",
-    "apk":     "apk add {{names}}",
+	"apt-get": "apt-get install -y {{names}}",
+	"pacman":  "pacman -S --noconfirm {{names}}",
+	"apk":     "apk add {{names}}",
+	"dnf":     "dnf install -y {{names}}",
+	"yum":     "yum install -y {{names}}",
+	"zypper":  "zypper install -y {{names}}",
+	"brew":    "brew install {{names}}",
 }
 
 var BaseSingleTemplates = map[string]string{
-    "apt-get": "apt-get install -y {{name}}",
-    "pacman":  "pacman -S --noconfirm {{name}}",
-    "apk":     "apk add {{name}}",
+	"apt-get": "apt-get install -y {{name}}",
+	"pacman":  "pacman -S --noconfirm {{name}}",
+	"apk":     "apk add {{name}}",
+	"dnf":     "dnf install -y {{name}}",
+	"yum":     "yum install -y {{name}}",
+	"zypper":  "zypper install -y {{name}}",
+	"brew":    "brew install {{name}}",
 }
 
 var DefaultPMTemplatesMap = map[string]PMTemplates{
-    "brew":  {Check: "brew list {{.name}}", Install: "brew install {{.name}}", Update: "brew upgrade {{.name}}"},
-    "npm":   {Check: "npm ls -g {{.name}}", Install: "npm install -g {{.name}}", Update: "npm update -g {{.name}}"},
-    "cargo": {Check: "cargo install --list | grep '^{{.name}}'", Install: "cargo install {{.name}}", Update: "cargo install {{.name}} --force"},
-    "conda": {Check: "conda list {{.name}}", Install: "conda install -y {{.name}}", Update: "conda update -y {{.name}}"},
-    "pip":   {Check: "pip show {{.name}}", Install: "pip install {{.name}}", Update: "pip install --upgrade {{.name}}"},
+	"brew":  {Check: "brew list {{.name}}", Install: "brew install {{.name}}", Update: "brew upgrade {{.name}}"},
+	"npm":   {Check: "npm ls -g {{.name}}", Install: "npm install -g {{.name}}", Update: "npm update -g {{.name}}"},
+	"cargo": {Check: "cargo install --list | grep '^{{.name}}'", Install: "cargo install {{.name}}", Update: "cargo install {{.name}} --force"},
+	"conda": {Check: "conda list {{.name}}", Install: "conda install -y {{.name}}", Update: "conda update -y {{.name}}"},
+	"pip":   {Check: "pip show {{.name}}", Install: "pip install {{.name}}", Update: "pip install --upgrade {{.name}}"},
+	
+	"gem": {
+		Check:   "gem list -i {{.name}}",
+		Install: "gem install {{.name}}",
+		Update:  "gem update {{.name}}",
+	},
+	"go": {
+		Check:   "ls $(go env GOPATH)/bin/{{.name}}", 
+		Install: "go install {{.name}}@latest",
+		Update:  "go install {{.name}}@latest",
+	},
+	"snap": {
+		Check:   "snap list {{.name}}",
+		Install: "snap install {{.name}}", // sudo handled by engine if needed
+		Update:  "snap refresh {{.name}}",
+	},
+	"flatpak": {
+		Check:   "flatpak list --app | grep {{.name}}",
+		Install: "flatpak install -y {{.name}}",
+		Update:  "flatpak update -y {{.name}}",
+	},
 }
+
 
 func GetPMTemplates(pm string) (string, string, string) {
     if t, ok := DefaultPMTemplatesMap[pm]; ok {
