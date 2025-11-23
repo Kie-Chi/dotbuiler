@@ -5,10 +5,13 @@ import (
 	"os"
 	"strings"
 	"time"
+	"sync"
 )
 
-var debugEnabled bool
-
+var (
+	debugEnabled bool
+	logMu        sync.Mutex
+)
 // ANSI Color Codes
 const (
 	Reset  = "\033[0m"
@@ -33,18 +36,24 @@ func ts() string {
 func SetDebug(enable bool) { debugEnabled = enable }
 
 func Info(format string, args ...interface{}) {
+	logMu.Lock()
+	defer logMu.Unlock()
 	prefix := "[INFO]"
 	msg := fmt.Sprintf(format, args...)
 	fmt.Printf("%s %s %s\n", ts(), prefix, msg)
 }
 
 func Warn(format string, args ...interface{}) {
+	logMu.Lock()
+	defer logMu.Unlock()
 	prefix := Yellow + "[WARN]" + Reset
 	msg := fmt.Sprintf(format, args...)
 	fmt.Printf("%s %s %s\n", ts(), prefix, msg)
 }
 
 func Error(format string, args ...interface{}) {
+	logMu.Lock()
+	defer logMu.Unlock()
 	prefix := Red + "[ERRO]" + Reset
 	msg := fmt.Sprintf(format, args...)
 	fmt.Printf("%s %s %s\n", ts(), prefix, msg)
@@ -52,6 +61,8 @@ func Error(format string, args ...interface{}) {
 }
 
 func Success(format string, args ...interface{}) {
+	logMu.Lock()
+	defer logMu.Unlock()
 	prefix := Green + "[DONE]" + Reset
 	msg := fmt.Sprintf(format, args...)
 	fmt.Printf("%s %s %s\n", ts(), prefix, msg)
@@ -61,6 +72,8 @@ func Debug(format string, args ...interface{}) {
 	if !debugEnabled {
 		return
 	}
+	logMu.Lock()
+	defer logMu.Unlock()
 	prefix := Gray + "[DBUG]" + Reset
 	msg := fmt.Sprintf(format, args...)
 	fmt.Printf("%s %s %s\n", ts(), prefix, msg)

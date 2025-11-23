@@ -2,6 +2,7 @@ package dag
 
 import (
 	"errors"
+	"sort"
 )
 
 // Graph adjacency list
@@ -55,4 +56,60 @@ func (g *Graph) Sort(items []string) ([]string, error) {
 	return result, nil
 }
 
+func (g *Graph) SortLayers(items []string) ([][]string, error) {
+	adj := make(map[string][]string)
+	inDegree := make(map[string]int)
 
+	for _, id := range items {
+		inDegree[id] = 0
+	}
+
+	// Fill data based on dependencies
+	// g.Nodes[child] = [parent1, parent2...]
+	for _, child := range items {
+		parents := g.Nodes[child]
+		inDegree[child] = len(parents) // Node has N dependencies
+		for _, p := range parents {
+			// Record that Parent points to Child
+			adj[p] = append(adj[p], child)
+		}
+	}
+
+	var layers [][]string
+	var queue []string
+
+	for id, d := range inDegree {
+		if d == 0 {
+			queue = append(queue, id)
+		}
+	}
+	sort.Strings(queue) // Sort for deterministic behavior
+
+	processedCount := 0
+
+	for len(queue) > 0 {
+		layers = append(layers, queue) // Add current layer
+		processedCount += len(queue)
+		
+		var nextQueue []string
+
+		// Process current layer
+		for _, u := range queue {
+			// 'u' is completed, now verify its children
+			for _, v := range adj[u] {
+				inDegree[v]--
+				if inDegree[v] == 0 {
+					nextQueue = append(nextQueue, v)
+				}
+			}
+		}
+		sort.Strings(nextQueue)
+		queue = nextQueue
+	}
+
+	if processedCount != len(items) {
+		return nil, errors.New("detected cycle in dependency graph")
+	}
+
+	return layers, nil
+}

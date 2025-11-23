@@ -9,8 +9,8 @@ import (
 
 type SystemInfo struct {
 	OS     string
-	Distro string
-	BasePM string
+	Distro string // e.g., "ubuntu", "arch", "fedora"
+	BasePM string // e.g., "apt-get", "pacman"
 }
 
 func Detect() *SystemInfo {
@@ -26,44 +26,49 @@ func Detect() *SystemInfo {
 		}
 	}
 
-	id := readOSRelease("ID")
-	idLike := readOSRelease("ID_LIKE")
-	name := readOSRelease("NAME")
-
-	s := strings.ToLower(id + " " + idLike + " " + name)
-	distro, base := resolveDistroAndPM(s)
+	// Read os-release
+	id := readOSRelease("ID")           // e.g. "ubuntu", "pop"
+	idLike := readOSRelease("ID_LIKE")  // e.g. "debian", "ubuntu"
 	
-	info.Distro = distro
-	info.BasePM = base
+	// Use the actual ID as Distro for map matching
+	if id != "" {
+		info.Distro = id
+	} else {
+		info.Distro = "linux"
+	}
+
+	// Resolve PM based on combined info
+	s := strings.ToLower(id + " " + idLike)
+	info.BasePM = resolveBasePM(s)
 	
 	return info
 }
 
-func resolveDistroAndPM(s string) (string, string) {
+func resolveBasePM(s string) string {
 	switch {
-	case strings.Contains(s, "ubuntu") || strings.Contains(s, "debian") || strings.Contains(s, "kali") || strings.Contains(s, "pop"):
-		return "apt", "apt-get"
+	case strings.Contains(s, "ubuntu") || strings.Contains(s, "debian") || strings.Contains(s, "kali") || strings.Contains(s, "pop") || strings.Contains(s, "mint"):
+		return "apt-get"
 	case strings.Contains(s, "arch") || strings.Contains(s, "manjaro") || strings.Contains(s, "endeavour"):
-		return "pacman", "pacman"
+		return "pacman"
 	case strings.Contains(s, "alpine"):
-		return "apk", "apk"
-	case strings.Contains(s, "fedora"):
-		return "dnf", "dnf"
-	case strings.Contains(s, "centos") || strings.Contains(s, "rhel") || strings.Contains(s, "redhat") || strings.Contains(s, "rocky") || strings.Contains(s, "alma"):
+		return "apk"
+	case strings.Contains(s, "fedora") || strings.Contains(s, "rhel") || strings.Contains(s, "centos") || strings.Contains(s, "rocky") || strings.Contains(s, "alma"):
 		// Prefer DNF on newer RHEL/CentOS
 		if shell.CheckCommandExists("dnf") {
-			return "dnf", "dnf"
+			return "dnf"
 		}
-		return "yum", "yum"
+		return "yum"
 	case strings.Contains(s, "suse") || strings.Contains(s, "opensuse"):
-		return "zypper", "zypper"
+		return "zypper"
 	default:
 		// Fallback check
-		if shell.CheckCommandExists("apt-get") { return "apt", "apt-get" }
-		if shell.CheckCommandExists("pacman") { return "pacman", "pacman" }
-		if shell.CheckCommandExists("dnf") { return "dnf", "dnf" }
-		if shell.CheckCommandExists("brew") { return "brew", "brew" }
-		return "unknown", "unknown"
+		if shell.CheckCommandExists("apt-get") { return "apt-get" }
+		if shell.CheckCommandExists("pacman") { return "pacman" }
+		if shell.CheckCommandExists("dnf") { return "dnf" }
+		if shell.CheckCommandExists("yum") { return "yum" }
+		if shell.CheckCommandExists("apk") { return "apk" }
+		if shell.CheckCommandExists("brew") { return "brew" }
+		return "unknown"
 	}
 }
 
@@ -81,7 +86,7 @@ func readOSRelease(key string) string {
 	for s.Scan() {
 		line := s.Text()
 		if strings.HasPrefix(line, key+"=") {
-			return strings.Trim(line[len(key)+1:], "\"")
+			return strings.Trim(strings.Trim(line[len(key)+1:], "\""), "'")
 		}
 	}
 	return ""

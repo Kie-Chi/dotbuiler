@@ -10,6 +10,25 @@ type PMTemplates struct {
     Update  string
 }
 
+var PMLockGroups = map[string]string{
+	"apt":     "dpkg",
+	"apt-get": "dpkg",
+	"dpkg":    "dpkg",
+	"nala":    "dpkg",
+
+	"yum":     "rpm",
+	"dnf":     "rpm",
+	"rpm":     "rpm",
+
+	"pacman":  "pacman",
+	"yay":     "pacman",
+	"paru":    "pacman",
+
+	"apk":     "apk",
+	"snap":    "snap",
+	"zypper":  "zypper",
+}
+
 var PMNeedsSudo = map[string]bool{
 	"apt-get": true, "apt": true,
 	"pacman":  true,
@@ -38,6 +57,9 @@ var BaseBatchTemplates = map[string]string{
 	"yum":     "yum install -y {{names}}",
 	"zypper":  "zypper install -y {{names}}",
 	"brew":    "brew install {{names}}",
+    "pip":     "pip install {{names}}",
+	"npm":     "npm install -g {{names}}",
+	"cargo":   "cargo install {{names}}",
 }
 
 var BaseSingleTemplates = map[string]string{
@@ -48,6 +70,14 @@ var BaseSingleTemplates = map[string]string{
 	"yum":     "yum install -y {{name}}",
 	"zypper":  "zypper install -y {{name}}",
 	"brew":    "brew install {{name}}",
+}
+
+var BaseCheckTemplates = map[string]string{
+    "apt-get": "dpkg -s {{name}}",
+    "apt":     "dpkg -s {{name}}",
+    "pacman":  "pacman -Qi {{name}}",
+    "dnf":     "rpm -q {{name}}",
+    "brew":    "brew list {{name}}",
 }
 
 var DefaultPMTemplatesMap = map[string]PMTemplates{
@@ -69,7 +99,7 @@ var DefaultPMTemplatesMap = map[string]PMTemplates{
 	},
 	"snap": {
 		Check:   "snap list {{.name}}",
-		Install: "snap install {{.name}}", // sudo handled by engine if needed
+		Install: "snap install {{.name}}",
 		Update:  "snap refresh {{.name}}",
 	},
 	"flatpak": {
@@ -79,28 +109,11 @@ var DefaultPMTemplatesMap = map[string]PMTemplates{
 	},
 }
 
-
 func GetPMTemplates(pm string) (string, string, string) {
     if t, ok := DefaultPMTemplatesMap[pm]; ok {
         return t.Check, t.Install, t.Update
     }
     return "", "", ""
-}
-
-func ResolveBasePMToken(s string) (string, string) {
-    x := strings.ToLower(s)
-    switch {
-    case strings.Contains(x, "ubuntu") || strings.Contains(x, "debian"):
-        return "apt", "apt-get"
-    case strings.Contains(x, "arch"):
-        return "pacman", "pacman"
-    case strings.Contains(x, "alpine"):
-        return "apk", "apk"
-    case strings.Contains(x, "brew"):
-        return "brew", "brew"
-    default:
-        return "unknown", "unknown"
-    }
 }
 
 func BuildBatchInstallCmd(basePM string, names []string, isRoot bool) string {
@@ -126,4 +139,3 @@ func BuildSingleInstallCmd(basePM, name string, isRoot bool) string {
     }
     return cmd
 }
-

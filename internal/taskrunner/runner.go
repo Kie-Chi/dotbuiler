@@ -1,97 +1,37 @@
 package taskrunner
 
 import (
+	"bytes"
 	"dotbuilder/internal/config"
 	"dotbuilder/internal/dag"
 	"dotbuilder/internal/pkgmanager"
 	"dotbuilder/pkg/logger"
 	"dotbuilder/pkg/shell"
-	"strconv"
+	"os"
+	"strings"
+	"sync"
+	"text/template"
 )
 
-// RunUnified merges packages and tasks into a single DAG and executes them with batch optimization
-func RunUnified(pkgs []config.Package, tasks []config.Task, engine *pkgmanager.Engine, globalVars map[string]string) {
-	logger.Info("=== Start unified DAG execution ===")
-
-	g := dag.New()
-	nodeMap := make(map[string]string) // id -> "pkg" | "task"
-
-	// 1. Build Graph Nodes
-	pkgIndex := make(map[string]*config.Package)
-	for i := range pkgs {
-		p := &pkgs[i]
-		id := p.Name // assuming unique
-		if id == "" {
-			id = p.Def
-		}
-		nodeMap[id] = "pkg"
-		pkgIndex[id] = p
-		for _, dep := range p.Deps {
-			g.AddEdge(dep, id)
-		}
-	}
-
-	taskIndex := make(map[string]config.Task)
-	for _, t := range tasks {
-		nodeMap[t.ID] = "task"
-		taskIndex[t.ID] = t
-		for _, dep := range t.Deps {
-			g.AddEdge(dep, t.ID)
-		}
-	}
-
-	// 2. Sort
-	var ids []string
-	for id := range nodeMap {
-		ids = append(ids, id)
-	}
-	sorted, err := g.Sort(ids)
-	if err != nil {
-		logger.Error("Unified DAG cycle: %v", err)
-	}
-
-	// 复用 Engine 中的 Runner (包含 DryRun 状态)
-	runner := engine.Runner
-
-	// 3. Execute with Batch Lookahead
-	var batchBuffer []*config.Package
-
-	// Helper to flush buffer
-	flushBatch := func() {
-		if len(batchBuffer) > 0 {
-			engine.InstallBaseBatch(batchBuffer)
-			batchBuffer = nil
-		}
-	}
-
-	for _, id := range sorted {
-		typ := nodeMap[id]
-
-		if typ == "pkg" {
-			p := pkgIndex[id]
-			// Check if batchable
-			if engine.IsBatchable(p) {
-				batchBuffer = append(batchBuffer, p)
-			} else {
-				// Cannot batch this one, flush previous batch first
-				flushBatch()
-				engine.InstallOne(p)
+func resolveMapVariables(vars map[string]string) {
+	data := map[string]interface{}{"vars": vars}
+	for k, v := range vars {
+		if strings.Contains(v, "{{") {
+			tmpl, err := template.New("v").Parse(v)
+			if err == nil {
+				var buf bytes.Buffer
+				if err := tmpl.Execute(&buf, data); err == nil {
+					vars[k] = buf.String()
+				}
 			}
-		} else if typ == "task" {
-			// Task execution, flush batch first
-			flushBatch()
-			t := taskIndex[id]
-			executeTask(t, runner, globalVars)
 		}
 	}
-	// Flush remaining
-	flushBatch()
 }
 
-func executeTask(t config.Task, runner *shell.Runner, globalVars map[string]string) {
-	logger.Info("Task: [%s]", t.ID)
+func ExecuteTaskLogic(t config.Task, runner *shell.Runner, globalVars map[string]string) error {
+	logger.Debug("Task Logic: [%s]", t.ID)
 
-	// Prepare Data
+	// Merge Vars
 	vars := make(map[string]string)
 	for k, v := range globalVars {
 		vars[k] = v
@@ -100,41 +40,166 @@ func executeTask(t config.Task, runner *shell.Runner, globalVars map[string]stri
 		vars[k] = v
 	}
 
+	resolveMapVariables(vars)
+
 	tplData := map[string]interface{}{
 		"vars": vars,
-		// task doesn't have "name" context usually, or use t.Name
 		"name": t.ID,
 	}
 
-	// Render
-	checkCmd := pkgmanager.RenderCmd(t.Check, tplData)
-	runCmd := pkgmanager.RenderCmd(t.Run, tplData)
+	checkPassed := false
+	checkRun := false
+
+	if t.Check != "" {
+		checkRun = true
+		renderedCheck := pkgmanager.RenderCmd(t.Check, tplData)
+
+		if strings.HasPrefix(renderedCheck, "exists:") {
+			path := strings.TrimSpace(strings.TrimPrefix(renderedCheck, "exists:"))
+			path = os.ExpandEnv(path) 
+			if _, err := os.Stat(path); err == nil {
+				checkPassed = true
+			}
+		} else {
+			if runner.ExecSilent(renderedCheck) == 0 {
+				checkPassed = true
+			}
+		}
+	}
 
 	shouldRun := true
+	if checkRun {
+		var action string
+		if checkPassed {
+			action = "skip" // 默认 Check 通过则 Skip
+		} else {
+			action = "run"
+		}
 
-	if checkCmd != "" {
-		code := runner.ExecSilent(checkCmd)
-		action := "run" // default
-
-		if act, ok := t.On[strconv.Itoa(code)]; ok {
-			action = act
-		} else if act, ok := t.On["fail"]; ok && code != 0 {
-			action = act
-		} else if act, ok := t.On["success"]; ok && code == 0 {
+		statusKey := "fail"
+		if checkPassed {
+			statusKey = "success"
+		}
+		
+		if act, ok := t.On[statusKey]; ok {
 			action = act
 		}
 
 		if action == "skip" {
 			shouldRun = false
-			logger.Success("  Check passed, skipping.")
+			logger.Success("[%s] Check passed (skipped).", t.ID)
 		}
 	}
 
 	if shouldRun {
-		if err := runner.ExecStream(runCmd); err != nil {
-			logger.Error("  Task failed: %v", err)
-		} else {
-			logger.Success("  Task completed.")
+		runCmd := pkgmanager.RenderCmd(t.Run, tplData)
+		logger.Info("Running Task: [%s]", t.ID)
+		if err := runner.ExecStream(runCmd, t.ID); err != nil {
+			return err
+		}
+		logger.Success("[%s] Completed.", t.ID)
+	}
+	return nil
+}
+
+func RunGeneric(nodes []Node, ctx *Context) {
+	logger.Info("=== Start Generic DAG Execution ===")
+
+	// 1. Build Graph & Map
+	g := dag.New()
+	nodeMap := make(map[string]Node)
+	var ids []string
+
+	for _, n := range nodes {
+		id := n.ID()
+		if _, exists := nodeMap[id]; exists {
+			logger.Warn("Duplicate Node ID detected: %s (overwriting)", id)
+		}
+		nodeMap[id] = n
+		ids = append(ids, id)
+	}
+
+	// Second Pass: Build Edges & Validate Deps
+	for _, n := range nodes {
+		id := n.ID()
+		for _, dep := range n.Deps() {
+			if _, exists := nodeMap[dep]; !exists {
+				// [Fix] Critical: Missing dependency must cause exit, otherwise sorting loops
+				logger.Error("Node [%s] depends on missing node [%s]. Execution aborted.", id, dep)
+				os.Exit(1)
+			}
+			g.AddEdge(dep, id)
+		}
+	}
+
+	// 2. Sort Layers
+	layers, err := g.SortLayers(ids)
+	if err != nil {
+		logger.Error("DAG Cycle detected or Sort failed: %v", err)
+		os.Exit(1)
+	}
+
+	for i, layer := range layers {
+		logger.Info("--- Layer %d (%d items) ---", i+1, len(layer))
+		
+		batches := make(map[string][]BatchableNode)
+		var singles []Node
+
+		for _, id := range layer {
+			n, ok := nodeMap[id]
+			if !ok { continue }
+
+			group := n.BatchGroup()
+			addedToBatch := false
+			if group != "" {
+				if bn, ok := n.(BatchableNode); ok {	
+					batches[group] = append(batches[group], bn)
+					addedToBatch = true
+				} 
+			} 
+			if !addedToBatch {
+				singles = append(singles, n)
+			}
+		}
+
+		var wg sync.WaitGroup
+		errChan := make(chan error, len(singles)+len(batches)+1)
+
+		for groupName, batchNodes := range batches {
+			var names []string
+			for _, bn := range batchNodes {
+				names = append(names, bn.GetBatchItem())
+			}
+			
+			wg.Add(1)
+			go func(pm string, pkgNames []string) {
+				defer wg.Done()
+				ctx.PkgManager.InstallBatch(pm, pkgNames)
+			}(groupName, names)
+		}
+
+		for _, n := range singles {
+			wg.Add(1)
+			go func(node Node) {
+				defer wg.Done()
+				if err := node.Execute(ctx); err != nil {
+					logger.Error("[%s] Failed: %v", node.ID(), err)
+					errChan <- err
+				}
+			}(n)
+		}
+
+		wg.Wait()
+		close(errChan)
+
+		hasError := false
+		for range errChan {
+			hasError = true
+		}
+
+		if hasError {
+			logger.Error("Layer %d failed. Stopping execution.", i+1)
+			os.Exit(1)
 		}
 	}
 }

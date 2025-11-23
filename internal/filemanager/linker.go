@@ -12,10 +12,7 @@ import (
 
 // Helper to render path strings
 func renderPathString(tplStr string, vars map[string]string) string {
-	// Simple map wrapper for template data
-	data := map[string]interface{}{
-		"vars": vars,
-	}
+	data := map[string]interface{}{"vars": vars}
 	tmpl, err := template.New("path").Parse(tplStr)
 	if err != nil {
 		return tplStr
@@ -27,118 +24,108 @@ func renderPathString(tplStr string, vars map[string]string) string {
 	return buf.String()
 }
 
-func ProcessFiles(files []config.File, vars map[string]string, dryRun bool) {
+func ProcessFiles(files []config.File, vars map[string]string, dryRun bool, baseDir string) {
 	logger.Info("=== Start processing file links ===")
-
-	home, _ := os.UserHomeDir()
+	
+	var fs FileSystem
+	if dryRun {
+		fs = DryRunFS{}
+	} else {
+		fs = RealFS{}
+	}
 
 	for _, f := range files {
-		// 1. Render variables in paths (Fix for {{.vars.home}})
-		rawSrc := renderPathString(f.Src, vars)
-		rawDest := renderPathString(f.Dest, vars)
+		ProcessSingleFile(f, vars, fs, baseDir)
+	}
+}
 
-		// 2. Path expansion (~)
-		src := expandPath(rawSrc, home)
-		dest := expandPath(rawDest, home)
-		
-		// Ensure absolute path for source if it exists relative to cwd
-		if !filepath.IsAbs(src) && !strings.HasPrefix(src, "~") {
-			wd, _ := os.Getwd()
-			src = filepath.Join(wd, src)
-		}
+func ProcessSingleFile(f config.File, vars map[string]string, fs FileSystem, baseDir string) {
+	home, _ := os.UserHomeDir()
+	rawSrc := renderPathString(f.Src, vars)
+	rawDest := renderPathString(f.Dest, vars)
+	
+	src := expandPath(rawSrc, home)
+	dest := expandPath(rawDest, home)
 
-		logger.Info("File: %s -> %s", dest, src)
+	// Fix: Resolve relative path based on config location (BaseDir)
+	if !filepath.IsAbs(src) && !strings.HasPrefix(src, "~") {
+		src = filepath.Join(baseDir, src)
+	}
 
-		// 1. DryRun / Mkdir
-		dir := filepath.Dir(dest)
-		if !dryRun {
-			os.MkdirAll(dir, 0755)
-		} else {
-			logger.Debug("[DryRun] MkdirAll %s", dir)
-		}
+	logger.Info("File: %s -> %s", dest, src)
 
-		// 2. Check destination status
-		if info, err := os.Lstat(dest); err == nil {
-			// 目标存在
-			if f.Tpl {
-				if !f.Force {
-					logger.Warn("  Target exists, skipping (use force=true to overwrite)")
-					continue
-				}
-			} else {
-				if info.Mode()&os.ModeSymlink != 0 {
-					target, _ := os.Readlink(dest)
-					if target == src {
-						logger.Success("  Already linked correctly.")
-						continue
-					}
-				}
-				
-				if !f.Force {
-					logger.Warn("  Target exists and is not correct link, skipping.")
-					continue
-				}
-				
-				if dryRun {
-					logger.Info("  [DryRun] Remove %s", dest)
-				} else {
-					os.Remove(dest)
-				}
-			}
-		}
+	dir := filepath.Dir(dest)
+	fs.MkdirAll(dir, 0755)
 
-		// 3. Execute Action
+	if info, err := fs.Lstat(dest); err == nil {
 		if f.Tpl {
-			if dryRun {
-				logger.Info("  [DryRun] Render template to %s", dest)
+			if !f.Force {
+				logger.Warn("  Target exists, skipping (use force=true)")
+				return
 			} else {
-				if err := renderTemplateFile(src, dest, vars); err != nil {
-					logger.Warn("  Template render failed: %v", err)
-				} else {
-					logger.Success("  Template rendered.")
-				}
+				fs.Remove(dest)
 			}
 		} else {
-			if dryRun {
-				logger.Info("  [DryRun] Ln -s %s %s", src, dest)
-			} else {
-				if err := os.Symlink(src, dest); err != nil {
-					logger.Warn("  Link failed: %v", err)
-				} else {
-					logger.Success("  Linked.")
+			if info.Mode()&os.ModeSymlink != 0 {
+				target, _ := fs.Readlink(dest)
+				if target == src {
+					logger.Success("  Already linked correctly.")
+					return
 				}
 			}
+			if !f.Force {
+				logger.Warn("  Target exists/incorrect, skipping.")
+				return
+			}
+			fs.Remove(dest)
+		}
+	}
+
+	if f.Tpl {
+		if err := renderTemplateFile(src, dest, vars, fs); err != nil {
+			logger.Warn("  Template render failed: %v", err)
+		} else {
+			logger.Success("  Template rendered.")
+		}
+	} else {
+		if err := fs.Symlink(src, dest); err != nil {
+			logger.Warn("  Link failed: %v", err)
+		} else {
+			logger.Success("  Linked.")
 		}
 	}
 }
 
 func expandPath(path, home string) string {
+	path = os.ExpandEnv(path)
 	if strings.HasPrefix(path, "~") {
 		return filepath.Join(home, path[1:])
 	}
 	return path
 }
 
-func renderTemplateFile(src, dest string, data map[string]string) error {
-	b, err := os.ReadFile(src)
+func renderTemplateFile(src, dest string, data map[string]string, fs FileSystem) error {
+	b, err := fs.ReadFile(src)
 	if err != nil {
 		return err
 	}
-	// Wrap data for consistency: {{.vars.email}}
-	tplData := map[string]interface{}{
-		"vars": data,
-	}
-	
+	tplData := map[string]interface{}{"vars": data}
 	tmpl, err := template.New("file").Parse(string(b))
 	if err != nil {
 		return err
 	}
-	os.MkdirAll(filepath.Dir(dest), 0755)
 	
-	f, err := os.Create(dest)
-	if err != nil {
+	// Prepare buffer to write
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, tplData); err != nil {
 		return err
 	}
-	defer f.Close()
-	return tmpl.Execute(f, tplData)
+	
+	// Check source perms
+	var mode os.FileMode = 0644
+	if info, err := fs.Stat(src); err == nil {
+		mode = info.Mode().Perm()
+	}
+
+	return fs.WriteFile(dest, buf.Bytes(), mode)
 }
