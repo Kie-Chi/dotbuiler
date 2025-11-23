@@ -146,7 +146,9 @@ func (e *Engine) InstallBatch(pmName string, names []string) {
 func (e *Engine) InstallOne(p *config.Package) error {
 	managerStr := p.GetManager()
 	if managerStr == "" {
-		if e.Sys.BasePM != "" && e.Sys.BasePM != "unknown" {
+		if p.Exec != "" {
+			managerStr = "non-pm"
+		} else if e.Sys.BasePM != "" && e.Sys.BasePM != "unknown" {
 			managerStr = e.Sys.BasePM
 		} else {
 			logger.Error("No manager specified for package '%s' and system BasePM is unknown.", p.Name)
