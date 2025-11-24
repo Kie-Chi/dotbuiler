@@ -20,7 +20,7 @@ type Engine struct {
 	IsRoot        bool
 	mu            sync.Mutex
 	UpdatedPMs    map[string]bool
-	pmLocks       sync.Map 
+	pmLocks       sync.Map
 }
 
 // NewEngine
@@ -37,14 +37,14 @@ func NewEngine(sys *context.SystemInfo, vars map[string]string, isRoot bool, dry
 
 func (e *Engine) acquireLock(pmName string) func() {
 	lockKey, ok := constants.PMLockGroups[pmName]
-	
+
 	if !ok {
 		return func() {}
 	}
 
 	val, _ := e.pmLocks.LoadOrStore(lockKey, &sync.Mutex{})
 	mu := val.(*sync.Mutex)
-	
+
 	mu.Lock()
 	return func() { mu.Unlock() }
 }
@@ -59,7 +59,7 @@ func (e *Engine) EnsurePMUpdated(pmName string) {
 	e.mu.Unlock()
 
 	var updateCmd string
-	
+
 	if customPM, ok := e.RegisteredPMs[pmName]; ok {
 		if customPM.Upd != "" {
 			tplData := map[string]interface{}{"vars": e.Vars}
@@ -78,7 +78,7 @@ func (e *Engine) EnsurePMUpdated(pmName string) {
 		logger.Info("Updating metadata for PM: %s", pmName)
 		unlock := e.acquireLock(pmName)
 		defer unlock()
-		
+
 		// Use PM Name as log prefix
 		if err := e.Runner.ExecStream(updateCmd, pmName); err != nil {
 			logger.Warn("Failed to update PM %s: %v", pmName, err)
@@ -100,9 +100,9 @@ func (e *Engine) GetBatchManager(p *config.Package) string {
 	if p.Pre != "" || p.Post != "" || p.Exec != "" || p.Check != "" {
 		return ""
 	}
-	
+
 	mgr := p.GetManager()
-	
+
 	if mgr == "" || mgr == e.Sys.BasePM {
 		if _, ok := constants.BaseBatchTemplates[e.Sys.BasePM]; ok {
 			return e.Sys.BasePM
@@ -127,9 +127,9 @@ func (e *Engine) InstallBatch(pmName string, names []string) {
 	}
 
 	e.EnsurePMUpdated(pmName)
-	
+
 	logger.Info("Batch installing [%s]: %v", pmName, names)
-	
+
 	unlock := e.acquireLock(pmName)
 	defer unlock()
 
@@ -157,7 +157,7 @@ func (e *Engine) InstallOne(p *config.Package) error {
 	}
 
 	managers := strings.Split(managerStr, ";")
-	
+
 	tplData := map[string]interface{}{
 		"vars": e.Vars,
 		"name": p.Name,
@@ -181,23 +181,23 @@ func (e *Engine) InstallOne(p *config.Package) error {
 		if pm == "" { continue }
 
 		skipped, err := e.tryInstallCore(p, pm, tplData)
-		
+
 		if err == nil {
 			if skipped {
 				alreadyInstalled = true
 			} else {
 				installSuccess = true
 			}
-			break 
+			break
 		} else {
 			lastErr = err
 			logger.Debug("PM '%s' failed for '%s': %v", pm, p.Name, err)
 		}
 	}
-	
+
 	if alreadyInstalled {
 		logger.Success("[%s] Already installed (Checked).", p.Name)
-		return nil 
+		return nil
 	}
 
 	if !installSuccess {
@@ -233,14 +233,14 @@ func (e *Engine) tryInstallCore(p *config.Package, pm string, tplData map[string
 	if targetPM == "" {
 		targetPM = e.Sys.BasePM
 	}
-	
+
 	displayPM := targetPM
 	if displayPM == "" {
 		displayPM = "System"
 	}
 
 	isInstalled := false
-	
+
 	if p.Check != "" {
 		if e.Runner.ExecSilent(RenderCmd(p.Check, tplData)) == 0 {
 			isInstalled = true
@@ -266,20 +266,24 @@ func (e *Engine) tryInstallCore(p *config.Package, pm string, tplData map[string
 
 	logger.Info("Installing %s via %s...", p.Name, displayPM)
 
-	unlock := e.acquireLock(realPM)
-	defer unlock()
+    if pm != "none" {
+        e.EnsurePMUpdated(targetPM)
+    }
 
-	e.EnsurePMUpdated(targetPM)
+	if pm != "none" {
+        unlock := e.acquireLock(realPM)
+	    defer unlock()
+    }
 
 	var installCmd string
-	
+
 	if p.Exec != "" {
 		installCmd = RenderCmd(p.Exec, tplData)
 	} else if pmDef, ok := e.RegisteredPMs[realPM]; ok {
 		installCmd = RenderCmd(pmDef.PmInstallTpl, tplData)
 	} else {
 		_, installTpl, _ := constants.GetPMTemplates(realPM)
-		
+
 		if installTpl != "" {
 			installCmd = RenderCmd(installTpl, tplData)
 		} else {
