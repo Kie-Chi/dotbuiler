@@ -4,6 +4,7 @@ import (
 	"dotbuilder/internal/config"
 	"dotbuilder/internal/filemanager"
 	"dotbuilder/internal/pkgmanager"
+    "dotbuilder/pkg/constants"
 )
 
 // --- Package Node ---
@@ -12,7 +13,7 @@ type PkgNode struct {
 	Mgr *pkgmanager.Engine
 }
 
-func (n *PkgNode) ID() string { 
+func (n *PkgNode) ID() string {
     if n.Pkg.Name != "" { return n.Pkg.Name }
     return n.Pkg.Def
 }
@@ -28,24 +29,31 @@ func (n *PkgNode) BatchGroup() string {
 
 func (n *PkgNode) GetBatchItem() string {
     real := ""
-    
-    // 1. Check Distro Map
-    if val, ok := n.Pkg.Map[n.Mgr.Sys.Distro]; ok {
-        real = val
+    sys := n.Mgr.Sys
+
+    lookupKeys := constants.GetPkgLookupKeys(sys.Distro, sys.BasePM)
+
+    // Map
+    for _, key := range lookupKeys {
+        if val, ok := n.Pkg.Map[key]; ok {
+            real = val
+            break
+        }
     }
-    
-    // 2. Check Default (Def) - [Fix Added]
-    if real == "" { 
-        real = n.Pkg.Def 
+
+    // Def
+    if real == "" {
+        real = n.Pkg.Def
     }
-    
-    // 3. Fallback to Name
-    if real == "" { 
-        real = n.Pkg.Name 
+
+    // Name
+    if real == "" {
+        real = n.Pkg.Name
     }
-    
+
     return real
 }
+
 
 func (n *PkgNode) Execute(ctx *Context) error {
 	if err := ctx.PkgManager.InstallOne(n.Pkg); err != nil {
@@ -63,14 +71,14 @@ func (n *TaskNode) ID() string     { return n.Task.ID }
 func (n *TaskNode) Deps() []string { return n.Task.Deps }
 func (n *TaskNode) BatchGroup() string { return "" }
 
-func (n *TaskNode) Execute(ctx *Context) error {	
+func (n *TaskNode) Execute(ctx *Context) error {
 	return ExecuteTaskLogic(n.Task, ctx.Shell, ctx.Vars)
 }
 
 // --- File Node ---
 type FileNode struct {
     File config.File
-    Id   string 
+    Id   string
 }
 
 func (n *FileNode) ID() string { return n.Id }
@@ -84,6 +92,6 @@ func (n *FileNode) Execute(ctx *Context) error {
 	} else {
 		fs = filemanager.RealFS{}
 	}
-    filemanager.ProcessSingleFile(n.File, ctx.Vars, fs, ctx.BaseDir)
+    filemanager.ProcessSingleFile(n.File, ctx.Vars, fs, ctx.BaseDir, ctx.Shell.DryRun)
     return nil
 }

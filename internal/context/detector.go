@@ -5,16 +5,37 @@ import (
 	"dotbuilder/pkg/shell"
 	"os"
 	"strings"
+    "os/user"
 )
 
 type SystemInfo struct {
 	OS     string
 	Distro string // e.g., "ubuntu", "arch", "fedora"
 	BasePM string // e.g., "apt-get", "pacman"
+    User   string // e.g., chi
+    Home   string // e.g., home/chi
 }
 
 func Detect() *SystemInfo {
 	info := &SystemInfo{OS: "linux"}
+
+    u, err := user.Current()
+	if err == nil {
+		info.User = u.Username
+		info.Home = u.HomeDir
+	} else {
+		// Fallback
+		info.Home, _ = os.UserHomeDir()
+		info.User = os.Getenv("USER")
+	}
+
+    // if sudo used, though not recommended
+    if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" && info.User == "root" {
+		if realUser, err := user.Lookup(sudoUser); err == nil {
+			info.User = realUser.Username
+			info.Home = realUser.HomeDir
+		}
+	}
 
 	// macOS detection
 	if _, err := os.Stat("/Applications"); err == nil {
@@ -29,7 +50,7 @@ func Detect() *SystemInfo {
 	// Read os-release
 	id := readOSRelease("ID")           // e.g. "ubuntu", "pop"
 	idLike := readOSRelease("ID_LIKE")  // e.g. "debian", "ubuntu"
-	
+
 	// Use the actual ID as Distro for map matching
 	if id != "" {
 		info.Distro = id
@@ -40,7 +61,7 @@ func Detect() *SystemInfo {
 	// Resolve PM based on combined info
 	s := strings.ToLower(id + " " + idLike)
 	info.BasePM = resolveBasePM(s)
-	
+
 	return info
 }
 

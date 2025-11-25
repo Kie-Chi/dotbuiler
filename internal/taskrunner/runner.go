@@ -56,7 +56,7 @@ func ExecuteTaskLogic(t config.Task, runner *shell.Runner, globalVars map[string
 
 		if strings.HasPrefix(renderedCheck, "exists:") {
 			path := strings.TrimSpace(strings.TrimPrefix(renderedCheck, "exists:"))
-			path = os.ExpandEnv(path) 
+			path = os.ExpandEnv(path)
 			if _, err := os.Stat(path); err == nil {
 				checkPassed = true
 			}
@@ -80,7 +80,7 @@ func ExecuteTaskLogic(t config.Task, runner *shell.Runner, globalVars map[string
 		if checkPassed {
 			statusKey = "success"
 		}
-		
+
 		if act, ok := t.On[statusKey]; ok {
 			action = act
 		}
@@ -141,7 +141,7 @@ func RunGeneric(nodes []Node, ctx *Context) {
 
 	for i, layer := range layers {
 		logger.Info("--- Layer %d (%d items) ---", i+1, len(layer))
-		
+
 		batches := make(map[string][]BatchableNode)
 		var singles []Node
 
@@ -152,11 +152,11 @@ func RunGeneric(nodes []Node, ctx *Context) {
 			group := n.BatchGroup()
 			addedToBatch := false
 			if group != "" {
-				if bn, ok := n.(BatchableNode); ok {	
+				if bn, ok := n.(BatchableNode); ok {
 					batches[group] = append(batches[group], bn)
 					addedToBatch = true
-				} 
-			} 
+				}
+			}
 			if !addedToBatch {
 				singles = append(singles, n)
 			}
@@ -168,9 +168,11 @@ func RunGeneric(nodes []Node, ctx *Context) {
 		for groupName, batchNodes := range batches {
 			var names []string
 			for _, bn := range batchNodes {
-				names = append(names, bn.GetBatchItem())
-			}
-			
+                rawItem := bn.GetBatchItem()
+                parts := strings.Fields(rawItem)
+                names = append(names, parts...)
+            }
+
 			wg.Add(1)
 			go func(pm string, pkgNames []string) {
 				defer wg.Done()

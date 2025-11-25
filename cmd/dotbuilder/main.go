@@ -30,7 +30,7 @@ func main() {
 	if err != nil {
 		logger.Error("Failed to load configuration: %v", err)
 	}
-	
+
 	// Determine the base directory of the config file
 	absConfigPath, err := filepath.Abs(*configFile)
 	if err != nil {
@@ -54,13 +54,20 @@ func main() {
 		}()
 	}
 
-	logger.Info("Environment: OS=%s, Distro=%s, BasePM=%s", sysInfo.OS, sysInfo.Distro, sysInfo.BasePM)
+    logger.Info("Environment: OS=%s, User=%s, Home=%s", sysInfo.OS, sysInfo.User, sysInfo.Home)
 
 	vars := cfg.Vars
 	if vars == nil { vars = make(map[string]string) }
 	vars["OS"] = sysInfo.OS
 	vars["DISTRO"] = sysInfo.Distro
-	
+
+    if _, ok := vars["home"]; !ok {
+		vars["home"] = sysInfo.Home
+	}
+	if _, ok := vars["user"]; !ok {
+		vars["user"] = sysInfo.User
+	}
+
 	resolveVariables(vars)
 	resolvePackageDefs(cfg.Pkgs, vars)
 
@@ -79,9 +86,16 @@ func main() {
 
 	// 1. Files -> Nodes
 	for i, f := range cfg.Files {
-		id := f.Dest
-		if id == "" { id = fmt.Sprintf("file_%d", i) }
-		
+        id := f.ID
+
+        if id == "" {
+            id = f.Dest
+        }
+
+        if id == "" {
+            id = fmt.Sprintf("file_%d", i)
+        }
+
 		nodes = append(nodes, &taskrunner.FileNode{
 			File: f,
 			Id:   id,
@@ -113,17 +127,17 @@ func resolveVariables(vars map[string]string) {
 		changed := false
 		for k, v := range vars {
 			if len(v) < 3 { continue }
-			
+
 			if !bytes.Contains([]byte(v), []byte("{{")) {
 				continue
 			}
 
 			tmpl, err := template.New("var").Parse(v)
 			if err != nil { continue }
-			
+
 			var buf bytes.Buffer
 			data := map[string]interface{}{"vars": vars}
-			
+
 			if err := tmpl.Execute(&buf, data); err == nil {
 				newVal := buf.String()
 				if newVal != v {
@@ -153,7 +167,7 @@ func resolvePackageDefs(pkgs []config.Package, vars map[string]string) {
 	for i := range pkgs {
 		pkgs[i].Name = render(pkgs[i].Name)
 		pkgs[i].Def = render(pkgs[i].Def)
-		
+
 		// Map values
 		for k, v := range pkgs[i].Map {
 			pkgs[i].Map[k] = render(v)

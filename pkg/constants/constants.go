@@ -86,14 +86,14 @@ var DefaultPMTemplatesMap = map[string]PMTemplates{
 	"cargo": {Check: "cargo install --list | grep '^{{.name}}'", Install: "cargo install {{.name}}", Update: "cargo install {{.name}} --force"},
 	"conda": {Check: "conda list {{.name}}", Install: "conda install -y {{.name}}", Update: "conda update -y {{.name}}"},
 	"pip":   {Check: "pip show {{.name}}", Install: "pip install {{.name}}", Update: "pip install --upgrade {{.name}}"},
-	
+
 	"gem": {
 		Check:   "gem list -i {{.name}}",
 		Install: "gem install {{.name}}",
 		Update:  "gem update {{.name}}",
 	},
 	"go": {
-		Check:   "ls $(go env GOPATH)/bin/{{.name}}", 
+		Check:   "ls $(go env GOPATH)/bin/{{.name}}",
 		Install: "go install {{.name}}@latest",
 		Update:  "go install {{.name}}@latest",
 	},
@@ -107,6 +107,23 @@ var DefaultPMTemplatesMap = map[string]PMTemplates{
 		Install: "flatpak install -y {{.name}}",
 		Update:  "flatpak update -y {{.name}}",
 	},
+}
+
+var PMAliases = map[string][]string{
+	"apt-get": {"apt"},          // DEB
+	"yum":     {"dnf"},          // RHEL
+	"dnf":     {"yum"},          // RHEL
+	"pacman":  {"yay", "paru"},  // Arch
+}
+
+func GetPkgLookupKeys(distro, basePM string) []string {
+    keys := []string{distro, basePM}
+
+    if aliases, ok := PMAliases[basePM]; ok {
+        keys = append(keys, aliases...)
+    }
+
+    return keys
 }
 
 func GetPMTemplates(pm string) (string, string, string) {

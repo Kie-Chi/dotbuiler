@@ -64,11 +64,14 @@ func (p *Package) GetManager() string {
 }
 
 type File struct {
-	Src   string 	`yaml:"src"`
-	Dest  string 	`yaml:"dest"`
-	Force bool   	`yaml:"force"`
-	Tpl   bool   	`yaml:"tpl"`
-	Deps  []string	`yaml:"deps"`
+    ID       string     `yaml:"id"`
+	Src      string 	`yaml:"src"`
+	Dest     string 	`yaml:"dest"`
+    Override bool       `yaml:"override"`
+    Check    string     `yaml:"check"`
+    Append   bool       `yaml:"append"`
+	Tpl      bool   	`yaml:"tpl"`
+	Deps     []string	`yaml:"deps"`
 }
 
 type Task struct {
