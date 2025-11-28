@@ -4,7 +4,6 @@ import (
 	"dotbuilder/internal/config"
 	"dotbuilder/internal/filemanager"
 	"dotbuilder/internal/pkgmanager"
-    "dotbuilder/pkg/constants"
 )
 
 // --- Package Node ---
@@ -28,30 +27,7 @@ func (n *PkgNode) BatchGroup() string {
 }
 
 func (n *PkgNode) GetBatchItem() string {
-    real := ""
-    sys := n.Mgr.Sys
-
-    lookupKeys := constants.GetPkgLookupKeys(sys.Distro, sys.BasePM)
-
-    // Map
-    for _, key := range lookupKeys {
-        if val, ok := n.Pkg.Map[key]; ok {
-            real = val
-            break
-        }
-    }
-
-    // Def
-    if real == "" {
-        real = n.Pkg.Def
-    }
-
-    // Name
-    if real == "" {
-        real = n.Pkg.Name
-    }
-
-    return real
+    return n.Pkg.ResolveName(n.Mgr.Sys)
 }
 
 
@@ -92,6 +68,6 @@ func (n *FileNode) Execute(ctx *Context) error {
 	} else {
 		fs = filemanager.RealFS{}
 	}
-    filemanager.ProcessSingleFile(n.File, ctx.Vars, fs, ctx.BaseDir, ctx.Shell.DryRun)
+    filemanager.ProcessSingleFile(n.File, ctx.Vars, fs, ctx.BaseDir, ctx.Shell)
     return nil
 }

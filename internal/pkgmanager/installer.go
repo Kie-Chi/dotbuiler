@@ -133,7 +133,7 @@ func (e *Engine) InstallBatch(pmName string, names []string) {
 	unlock := e.acquireLock(pmName)
 	defer unlock()
 
-	cmd := constants.BuildBatchInstallCmd(pmName, names, e.IsRoot)
+	cmd := e.buildBatchInstallCmd(pmName, names)
 
 	// Use PM Name + "Batch" as log prefix
 	logId := fmt.Sprintf("%s-batch", pmName)
@@ -223,6 +223,40 @@ func (e *Engine) InstallOne(p *config.Package) error {
 	return nil
 }
 
+func (e *Engine) getSuperCheckCmd(p *config.Package, pm string) string {
+    namesStr := p.ResolveName(e.Sys)
+    names := strings.Fields(namesStr)
+
+    if len(names) == 0 {
+        return "false"
+    }
+
+    var checkTpl string
+	if pmDef, ok := e.RegisteredPMs[pm]; ok && pmDef.PmCheckTpl != "" {
+		checkTpl = pmDef.PmCheckTpl
+	} else {
+        checkTpl, _, _ = constants.GetPMTemplates(pm)
+        if checkTpl == "" {
+            checkTpl = constants.BaseCheckTemplates[pm]
+        }
+    }
+
+    if checkTpl == "" {
+        return "" // No Template
+    }
+
+    var checks []string
+    for _, name := range names {
+        tplData := map[string]interface{}{
+            "name": name,
+            "vars": e.Vars,
+        }
+        checks = append(checks, RenderCmd(checkTpl, tplData))
+    }
+
+    return strings.Join(checks, " && ")
+}
+
 func (e *Engine) tryInstallCore(p *config.Package, pm string, tplData map[string]interface{}) (bool, error) {
 	realPM := pm
 	if realPM == "apt" && e.Sys.BasePM == "apt-get" {
@@ -241,24 +275,32 @@ func (e *Engine) tryInstallCore(p *config.Package, pm string, tplData map[string
 
 	isInstalled := false
 
+    checkTplData := make(map[string]interface{})
+    for k, v := range tplData {
+        checkTplData[k] = v
+    }
+
 	if p.Check != "" {
-		if e.Runner.ExecSilent(RenderCmd(p.Check, tplData)) == 0 {
+        superCheckCmd := e.getSuperCheckCmd(p, realPM)
+        if superCheckCmd == "" {
+            superCheckCmd = "false"
+        }
+
+        if _, ok := checkTplData["super"]; !ok {
+            checkTplData["super"] = make(map[string]interface{})
+        }
+
+        checkTplData["super"].(map[string]interface{})["check"] = superCheckCmd
+
+		if e.Runner.ExecSilent(RenderCmd(p.Check, checkTplData)) == 0 {
 			isInstalled = true
-		}
-	} else if pmDef, ok := e.RegisteredPMs[realPM]; ok {
-		checkCmd := RenderCmd(pmDef.PmCheckTpl, tplData)
-		if e.Runner.ExecSilent(checkCmd) == 0 {
-			isInstalled = true
-		}
-	} else {
-		checkTpl, _, _ := constants.GetPMTemplates(realPM)
-		if checkTpl != "" {
-			cmd := RenderCmd(checkTpl, tplData)
-			if e.Runner.ExecSilent(cmd) == 0 {
-				isInstalled = true
-			}
-		}
-	}
+        }
+    } else {
+        superCheckCmd := e.getSuperCheckCmd(p, realPM)
+        if superCheckCmd != "" && e.Runner.ExecSilent(superCheckCmd) == 0 {
+            isInstalled = true
+        }
+    }
 
 	if isInstalled {
 		return true, nil // Skipped, No Error
@@ -287,19 +329,13 @@ func (e *Engine) tryInstallCore(p *config.Package, pm string, tplData map[string
 		if installTpl != "" {
 			installCmd = RenderCmd(installTpl, tplData)
 		} else {
-			if realPM == "" || realPM == e.Sys.BasePM {
-				realName := p.Def
-				if val, ok := p.Map[e.Sys.Distro]; ok {
-					realName = val
-				}
-				if realName == "" {
-					realName = p.Name
-				}
-				installCmd = constants.BuildSingleInstallCmd(e.Sys.BasePM, realName, e.IsRoot)
+		    if realPM == "" || realPM == e.Sys.BasePM {
+                nameForInstall := p.ResolveName(e.Sys)
+				installCmd = e.buildSingleInstallCmd(e.Sys.BasePM, nameForInstall)
 			} else {
 				return false, fmt.Errorf("unknown PM: %s", realPM)
 			}
-		}
+        }
 	}
 
 	if err := e.Runner.ExecStream(installCmd, p.Name); err != nil {
@@ -308,3 +344,41 @@ func (e *Engine) tryInstallCore(p *config.Package, pm string, tplData map[string
 
 	return false, nil // Not skipped (Installed), No Error
 }
+
+
+func (e *Engine) buildBatchInstallCmd(basePM string, names []string) string {
+    tpl, ok := constants.BaseBatchTemplates[basePM]
+    if !ok {
+        return basePM + " install " + strings.Join(names, " ")
+    }
+
+    data := map[string]interface{}{
+        "names": strings.Join(names, " "),
+        "vars": e.Vars,
+    }
+    cmd := RenderCmd(tpl, data)
+
+    if constants.PMNeedsSudo[basePM] && !e.IsRoot {
+        return "sudo " + cmd
+    }
+    return cmd
+}
+
+func (e *Engine) buildSingleInstallCmd(basePM, name string) string {
+    tpl, ok := constants.BaseSingleTemplates[basePM]
+    if !ok {
+        return basePM + " install " + name
+    }
+
+    data := map[string]interface{}{
+        "name": name,
+        "vars": e.Vars,
+    }
+    cmd := RenderCmd(tpl, data)
+
+    if constants.PMNeedsSudo[basePM] && !e.IsRoot {
+        return "sudo " + cmd
+    }
+    return cmd
+}
+

@@ -3,6 +3,7 @@ package filemanager
 import (
 	"bytes"
 	"dotbuilder/internal/config"
+    "dotbuilder/pkg/shell"
 	"dotbuilder/pkg/logger"
 	"os"
     "os/exec"
@@ -31,22 +32,31 @@ func runCheckCommand(cmdStr string, vars map[string]string) bool {
 	return cmd.Run() == nil // Exit Code 0 means true
 }
 
-func ProcessFiles(files []config.File, vars map[string]string, dryRun bool, baseDir string) {
+func ProcessFiles(files []config.File, vars map[string]string, runner *shell.Runner, baseDir string) {
 	logger.Info("=== Start processing file links ===")
 
 	var fs FileSystem
-	if dryRun {
+	if runner.DryRun {
 		fs = DryRunFS{}
 	} else {
 		fs = RealFS{}
 	}
 
 	for _, f := range files {
-		ProcessSingleFile(f, vars, fs, baseDir, dryRun)
+		ProcessSingleFile(f, vars, fs, baseDir, runner)
 	}
 }
 
-func ProcessSingleFile(f config.File, vars map[string]string, fs FileSystem, baseDir string, dryRun bool) {
+
+func ProcessSingleFile(f config.File, vars map[string]string, fs FileSystem, baseDir string, runner *shell.Runner) {
+    if f.Check != "" {
+        renderedCheck := renderPathString(f.Check, vars)
+        if runner.ExecSilent(renderedCheck) == 0 {
+            logger.Success("  File Check passed for dest '%s' (Skipped).", f.Dest)
+            return
+        }
+        logger.Debug("  File Check failed for dest '%s', proceeding.", f.Dest)
+    }
 	if f.Override && f.Append {
 		logger.Error("File config error: 'override' and 'append' cannot be both true for dest: %s", f.Dest)
 		return
@@ -115,7 +125,7 @@ func ProcessSingleFile(f config.File, vars map[string]string, fs FileSystem, bas
 		if err := fs.WriteFile(dest, newContent, destInfo.Mode()); err != nil {
 			logger.Error("  Append failed: %v", err)
 		} else {
-			logger.Success("  Appended.")
+            logger.Success("  Appended.")
 		}
 		return
 	}
@@ -129,13 +139,14 @@ func ProcessSingleFile(f config.File, vars map[string]string, fs FileSystem, bas
 			}
 		}
 		shouldOverride := f.Override
+        dryRun := runner.DryRun
 
-		if f.Override && f.Check != "" {
+		if f.Override && f.OverrideIf != "" {
 			if dryRun {
-				logger.Info("  [DryRun] Check command: %s -> assume true", f.Check)
+				logger.Info("  [DryRun] Check command: %s -> assume true", f.OverrideIf)
 				shouldOverride = true
 			} else {
-				if runCheckCommand(f.Check, vars) {
+				if runCheckCommand(f.OverrideIf, vars) {
 					logger.Info("  Check passed, proceeding to override.")
 					shouldOverride = true
 				} else {

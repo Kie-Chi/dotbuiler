@@ -2,7 +2,8 @@ package config
 
 import (
 	"os"
-
+    "dotbuilder/internal/context"
+    "dotbuilder/pkg/constants"
 	"gopkg.in/yaml.v3"
 )
 
@@ -63,15 +64,37 @@ func (p *Package) GetManager() string {
 	return p.Manager
 }
 
+func (p *Package) ResolveName(sys *context.SystemInfo) string {
+    realName := ""
+    lookupKeys := constants.GetPkgLookupKeys(sys.Distro, sys.BasePM)
+    for _, key := range lookupKeys {
+        if val, ok := p.Map[key]; ok {
+            realName = val
+            break
+        }
+    }
+
+    if realName == "" {
+        realName = p.Def
+    }
+
+    if realName == "" {
+        realName = p.Name
+    }
+
+    return realName
+}
+
 type File struct {
-    ID       string     `yaml:"id"`
-	Src      string 	`yaml:"src"`
-	Dest     string 	`yaml:"dest"`
-    Override bool       `yaml:"override"`
-    Check    string     `yaml:"check"`
-    Append   bool       `yaml:"append"`
-	Tpl      bool   	`yaml:"tpl"`
-	Deps     []string	`yaml:"deps"`
+    ID          string      `yaml:"id"`
+	Src         string 	    `yaml:"src"`
+	Dest        string 	    `yaml:"dest"`
+    Override    bool        `yaml:"override"`
+    Check       string      `yaml:"check"`
+    Append      bool        `yaml:"append"`
+    OverrideIf  string      `yaml:"override_if"`
+	Tpl         bool   	    `yaml:"tpl"`
+	Deps        []string	`yaml:"deps"`
 }
 
 type Task struct {

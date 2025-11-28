@@ -1,8 +1,5 @@
 package constants
 
-import (
-    "strings"
-)
 
 type PMTemplates struct {
     Check   string
@@ -50,34 +47,34 @@ var SystemUpdateCmds = map[string]string{
 }
 
 var BaseBatchTemplates = map[string]string{
-	"apt-get": "apt-get install -y {{names}}",
-	"pacman":  "pacman -S --noconfirm {{names}}",
-	"apk":     "apk add {{names}}",
-	"dnf":     "dnf install -y {{names}}",
-	"yum":     "yum install -y {{names}}",
-	"zypper":  "zypper install -y {{names}}",
-	"brew":    "brew install {{names}}",
-    "pip":     "pip install {{names}}",
-	"npm":     "npm install -g {{names}}",
-	"cargo":   "cargo install {{names}}",
+	"apt-get": "apt-get install -y {{.names}}",
+	"pacman":  "pacman -S --noconfirm {{.names}}",
+	"apk":     "apk add {{.names}}",
+	"dnf":     "dnf install -y {{.names}}",
+	"yum":     "yum install -y {{.names}}",
+	"zypper":  "zypper install -y {{.names}}",
+	"brew":    "brew install {{.names}}",
+    "pip":     "pip install {{.names}}",
+	"npm":     "npm install -g {{.names}}",
+	"cargo":   "cargo install {{.names}}",
 }
 
 var BaseSingleTemplates = map[string]string{
-	"apt-get": "apt-get install -y {{name}}",
-	"pacman":  "pacman -S --noconfirm {{name}}",
-	"apk":     "apk add {{name}}",
-	"dnf":     "dnf install -y {{name}}",
-	"yum":     "yum install -y {{name}}",
-	"zypper":  "zypper install -y {{name}}",
-	"brew":    "brew install {{name}}",
+	"apt-get": "apt-get install -y {{.name}}",
+	"pacman":  "pacman -S --noconfirm {{.name}}",
+	"apk":     "apk add {{.name}}",
+	"dnf":     "dnf install -y {{.name}}",
+	"yum":     "yum install -y {{.name}}",
+	"zypper":  "zypper install -y {{.name}}",
+	"brew":    "brew install {{.name}}",
 }
 
 var BaseCheckTemplates = map[string]string{
-    "apt-get": "dpkg -s {{name}}",
-    "apt":     "dpkg -s {{name}}",
-    "pacman":  "pacman -Qi {{name}}",
-    "dnf":     "rpm -q {{name}}",
-    "brew":    "brew list {{name}}",
+    "apt-get": "dpkg -s {{.name}}",
+    "apt":     "dpkg -s {{.name}}",
+    "pacman":  "pacman -Qi {{.name}}",
+    "dnf":     "rpm -q {{.name}}",
+    "brew":    "brew list {{.name}}",
 }
 
 var DefaultPMTemplatesMap = map[string]PMTemplates{
@@ -133,26 +130,3 @@ func GetPMTemplates(pm string) (string, string, string) {
     return "", "", ""
 }
 
-func BuildBatchInstallCmd(basePM string, names []string, isRoot bool) string {
-    tpl, ok := BaseBatchTemplates[basePM]
-    if !ok {
-        return basePM + " install " + strings.Join(names, " ")
-    }
-    cmd := strings.ReplaceAll(tpl, "{{names}}", strings.Join(names, " "))
-    if PMNeedsSudo[basePM] && !isRoot {
-        return "sudo " + cmd
-    }
-    return cmd
-}
-
-func BuildSingleInstallCmd(basePM, name string, isRoot bool) string {
-    tpl, ok := BaseSingleTemplates[basePM]
-    if !ok {
-        return basePM + " install " + name
-    }
-    cmd := strings.ReplaceAll(tpl, "{{name}}", name)
-    if PMNeedsSudo[basePM] && !isRoot {
-        return "sudo " + cmd
-    }
-    return cmd
-}
