@@ -2,9 +2,7 @@ name: Build and Sync to Dotfiles
 
 on:
   push:
-    branches: [ "master" ] # 监听主分支
-    tags:
-      - 'v*'
+    tags: [ 'v*' ]
 
 jobs:
   build-and-push:
@@ -23,7 +21,7 @@ jobs:
       - name: Build Binary
         working-directory: ./dotbuilder
         run: |
-          go build -o dotb main.go
+          go build -o dotb ./cmd/dotbuilder/main.go
           chmod +x dotb
 
       - name: Checkout Dotfiles
