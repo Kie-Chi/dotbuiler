@@ -1,0 +1,52 @@
+name: Build and Sync to Dotfiles
+
+on:
+  push:
+    branches: [ "master" ] # 监听主分支
+    tags:
+      - 'v*'
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout DotBuilder
+        uses: actions/checkout@v4
+        with:
+          path: dotbuilder
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+
+      - name: Build Binary
+        working-directory: ./dotbuilder
+        run: |
+          go build -o dotb main.go
+          chmod +x dotb
+
+      - name: Checkout Dotfiles
+        uses: actions/checkout@v4
+        with:
+          repository: Kie-Chi/dotfiles
+          token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+          path: dotfiles
+
+      - name: Copy and Push
+        working-directory: ./dotfiles
+        run: |
+          mkdir -p bin
+          
+          cp ../dotbuilder/dotb bin/dotb
+          
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if [[ -z $(git status -s) ]]; then
+            echo "No changes in binary, skipping push."
+            exit 0
+          fi
+          
+          git add bin/dotb
+          git commit -m "chore(bin): auto update dotb binary from source"
+          git push
