@@ -121,9 +121,9 @@ func (e *Engine) IsBatchable(p *config.Package) bool {
 	return e.GetBatchManager(p) != ""
 }
 
-func (e *Engine) InstallBatch(pmName string, names []string) {
+func (e *Engine) InstallBatch(pmName string, names []string) error {
 	if len(names) == 0 {
-		return
+		return nil
 	}
 
 	e.EnsurePMUpdated(pmName)
@@ -139,7 +139,10 @@ func (e *Engine) InstallBatch(pmName string, names []string) {
 	logId := fmt.Sprintf("%s-batch", pmName)
 	if err := e.Runner.ExecStream(cmd, logId); err != nil {
 		logger.Error("Batch install failed for %s: %v", pmName, err)
+		return err
 	}
+
+	return nil
 }
 
 
@@ -197,7 +200,7 @@ func (e *Engine) InstallOne(p *config.Package) error {
 
 	if alreadyInstalled {
 		logger.Success("[%s] Already installed (Checked).", p.Name)
-		return nil
+		return ErrSkipped
 	}
 
 	if !installSuccess {

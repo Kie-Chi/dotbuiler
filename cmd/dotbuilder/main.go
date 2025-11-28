@@ -118,7 +118,8 @@ func main() {
 		})
 	}
 
-	taskrunner.RunGeneric(nodes, ctx)
+	results := taskrunner.RunGeneric(nodes, ctx)
+	taskrunner.PrintSummary(results, nodes)
 	logger.Success("All build tasks completed")
 }
 
