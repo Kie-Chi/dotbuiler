@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"text/template"
+	"dotbuilder/internal/errors"
 )
 
 // Helper to render path strings
@@ -48,18 +49,19 @@ func ProcessFiles(files []config.File, vars map[string]string, runner *shell.Run
 }
 
 
-func ProcessSingleFile(f config.File, vars map[string]string, fs FileSystem, baseDir string, runner *shell.Runner) {
-    if f.Check != "" {
-        renderedCheck := renderPathString(f.Check, vars)
-        if runner.ExecSilent(renderedCheck) == 0 {
-            logger.Success("  File Check passed for dest '%s' (Skipped).", f.Dest)
-            return
-        }
-        logger.Debug("  File Check failed for dest '%s', proceeding.", f.Dest)
-    }
+func ProcessSingleFile(f config.File, vars map[string]string, fs FileSystem, baseDir string, runner *shell.Runner) error {
+	if f.Check != "" {
+		renderedCheck := renderPathString(f.Check, vars)
+		if runner.ExecSilent(renderedCheck) == 0 {
+			logger.Success("  File Check passed for dest '%s' (Skipped).", f.Dest)
+			return errors.NewSkipError("Check passed")
+		}
+		logger.Debug("  File Check failed for dest '%s', proceeding.", f.Dest)
+	}
+
 	if f.Override && f.Append {
 		logger.Error("File config error: 'override' and 'append' cannot be both true for dest: %s", f.Dest)
-		return
+		return nil
 	}
 
 	home, _ := os.UserHomeDir()
@@ -86,7 +88,7 @@ func ProcessSingleFile(f config.File, vars map[string]string, fs FileSystem, bas
 
 	if err != nil {
 		logger.Error("  Failed to read/render source: %v", err)
-		return
+		return err
 	}
 
 	dir := filepath.Dir(dest)
@@ -95,26 +97,44 @@ func ProcessSingleFile(f config.File, vars map[string]string, fs FileSystem, bas
 	destInfo, err := fs.Lstat(dest)
 	destExists := err == nil
 
+	if destExists {
+		if !f.Tpl && destInfo.Mode()&os.ModeSymlink != 0 {
+			target, _ := fs.Readlink(dest)
+			if target == src {
+				logger.Success("  Already linked correctly.")
+				return errors.NewSkipError("Already linked")
+			}
+		}
+
+		if f.Tpl || f.Override {
+			destContent, errRead := fs.ReadFile(dest)
+			if errRead == nil && bytes.Equal(destContent, srcContent) {
+				logger.Success("  Content identical (Skipped).")
+				return errors.NewSkipError("Content identical")
+			}
+		}
+	}
+
 	if f.Append {
 		if !destExists {
 			logger.Info("  Target does not exist, creating new file (Append mode).")
 			if err := fs.WriteFile(dest, srcContent, 0644); err != nil {
 				logger.Error("  Write failed: %v", err)
-			} else {
-				logger.Success("  Created.")
+				return err
 			}
-			return
+			logger.Success("  Created.")
+			return nil
 		}
 
 		destContent, err := fs.ReadFile(dest)
 		if err != nil {
 			logger.Error("  Failed to read target for append check: %v", err)
-			return
+			return err
 		}
 
 		if bytes.Contains(destContent, srcContent) {
 			logger.Success("  Content already exists in target (Skipped).")
-			return
+			return errors.NewSkipError("Content exists")
 		}
 
 		logger.Info("  Appending content to target...")
@@ -124,22 +144,15 @@ func ProcessSingleFile(f config.File, vars map[string]string, fs FileSystem, bas
 		newContent := append(destContent, srcContent...)
 		if err := fs.WriteFile(dest, newContent, destInfo.Mode()); err != nil {
 			logger.Error("  Append failed: %v", err)
-		} else {
-            logger.Success("  Appended.")
+			return err
 		}
-		return
+		logger.Success("  Appended.")
+		return nil
 	}
 
 	if destExists {
-		if !f.Tpl && destInfo.Mode()&os.ModeSymlink != 0 {
-			target, _ := fs.Readlink(dest)
-			if target == src {
-				logger.Success("  Already linked correctly.")
-				return
-			}
-		}
 		shouldOverride := f.Override
-        dryRun := runner.DryRun
+		dryRun := runner.DryRun
 
 		if f.Override && f.OverrideIf != "" {
 			if dryRun {
@@ -155,30 +168,30 @@ func ProcessSingleFile(f config.File, vars map[string]string, fs FileSystem, bas
 				}
 			}
 		}
-
 		if !shouldOverride {
 			logger.Warn("  Target exists, skipping (override=false or check failed).")
-			return
+			return errors.NewSkipError("Target exists")
 		}
 
 		logger.Info("  Removing existing target for override.")
 		fs.Remove(dest)
 	}
 
-	// link or write
 	if f.Tpl {
 		if err := fs.WriteFile(dest, srcContent, 0644); err != nil {
 			logger.Error("  Write failed: %v", err)
-		} else {
-			logger.Success("  Template rendered and written.")
+			return err
 		}
+		logger.Success("  Template rendered and written.")
 	} else {
 		if err := fs.Symlink(src, dest); err != nil {
 			logger.Warn("  Link failed: %v", err)
-		} else {
-			logger.Success("  Linked.")
+			return err
 		}
+		logger.Success("  Linked.")
 	}
+
+	return nil
 }
 
 func renderContent(src string, data map[string]string, fs FileSystem) ([]byte, error) {

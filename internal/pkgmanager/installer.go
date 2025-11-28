@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"dotbuilder/internal/errors"
 )
 
 // Engine
@@ -58,31 +59,17 @@ func (e *Engine) EnsurePMUpdated(pmName string) {
 	e.UpdatedPMs[pmName] = true
 	e.mu.Unlock()
 
-	var updateCmd string
-
-	if customPM, ok := e.RegisteredPMs[pmName]; ok {
-		if customPM.Upd != "" {
-			tplData := map[string]interface{}{"vars": e.Vars}
-			updateCmd = RenderCmd(customPM.Upd, tplData)
-		}
-	} else {
-		if cmd, ok := constants.SystemUpdateCmds[pmName]; ok {
-			updateCmd = cmd
-			if constants.PMNeedsSudo[pmName] && !e.IsRoot {
-				updateCmd = "sudo " + updateCmd
-			}
-		}
+	cmd := e.BuildSystemUpdateCmd(pmName)
+	if cmd == "" {
+		return 
 	}
 
-	if updateCmd != "" {
-		logger.Info("Updating metadata for PM: %s", pmName)
-		unlock := e.acquireLock(pmName)
-		defer unlock()
+	logger.Info("Updating metadata for PM: %s", pmName)
+	unlock := e.acquireLock(pmName)
+	defer unlock()
 
-		// Use PM Name as log prefix
-		if err := e.Runner.ExecStream(updateCmd, pmName); err != nil {
-			logger.Warn("Failed to update PM %s: %v", pmName, err)
-		}
+	if err := e.Runner.ExecStream(cmd, pmName); err != nil {
+		logger.Warn("Failed to update PM %s: %v", pmName, err)
 	}
 }
 
@@ -126,23 +113,29 @@ func (e *Engine) InstallBatch(pmName string, names []string) error {
 		return nil
 	}
 
-	e.EnsurePMUpdated(pmName)
+	var toInstall []string
+	for _, name := range names {
+		checkCmd := e.BuildCheckCmd(pmName, name)
+		if checkCmd != "" && e.Runner.ExecSilent(checkCmd) == 0 {
+			logger.Debug("[%s] Check passed for '%s'", pmName, name)
+			continue
+		}
+		toInstall = append(toInstall, name)
+	}
 
-	logger.Info("Batch installing [%s]: %v", pmName, names)
+	if len(toInstall) == 0 {
+		logger.Info("[%s] All batch items installed, Skipping.", pmName)
+		return errors.NewSkipError("All installed")
+	}
+
+	e.EnsurePMUpdated(pmName)
 
 	unlock := e.acquireLock(pmName)
 	defer unlock()
 
-	cmd := e.buildBatchInstallCmd(pmName, names)
-
-	// Use PM Name + "Batch" as log prefix
-	logId := fmt.Sprintf("%s-batch", pmName)
-	if err := e.Runner.ExecStream(cmd, logId); err != nil {
-		logger.Error("Batch install failed for %s: %v", pmName, err)
-		return err
-	}
-
-	return nil
+	logger.Info("Batch installing [%s]: %v", pmName, names)
+	cmd := e.BuildBatchInstallCmd(pmName, toInstall)
+	return e.Runner.ExecStream(cmd, fmt.Sprintf("%s-batch", pmName))
 }
 
 
@@ -154,7 +147,7 @@ func (e *Engine) InstallOne(p *config.Package) error {
 		} else if e.Sys.BasePM != "" && e.Sys.BasePM != "unknown" {
 			managerStr = e.Sys.BasePM
 		} else {
-			logger.Error("No manager specified for package '%s' and system BasePM is unknown.", p.Name)
+			logger.Warn("No manager specified for package '%s' and system BasePM is unknown.", p.Name)
 			return fmt.Errorf("no manager specified for package '%s'", p.Name)
 		}
 	}
@@ -170,7 +163,7 @@ func (e *Engine) InstallOne(p *config.Package) error {
 	if p.Pre != "" {
 		logger.Debug("Running Pre-Hook for %s", p.Name)
 		if err := e.Runner.ExecStream(RenderCmd(p.Pre, tplData), p.Name); err != nil {
-			logger.Error("[%s] Pre-hook failed: %v", p.Name, err)
+			logger.Warn("[%s] Pre-hook failed: %v", p.Name, err)
 			return err
 		}
 	}
@@ -200,7 +193,7 @@ func (e *Engine) InstallOne(p *config.Package) error {
 
 	if alreadyInstalled {
 		logger.Success("[%s] Already installed (Checked).", p.Name)
-		return ErrSkipped
+		return errors.NewSkipError("Already installed")
 	}
 
 	if !installSuccess {
@@ -211,14 +204,14 @@ func (e *Engine) InstallOne(p *config.Package) error {
 		if lastErr == nil {
 			lastErr = fmt.Errorf("installation failed or no valid PM found")
 		}
-		logger.Error("Failed to install '%s': %v", p.Name, lastErr)
+		logger.Warn("Failed to install '%s': %v", p.Name, lastErr)
 		return lastErr
 	}
 
 	if p.Post != "" {
 		logger.Debug("Running Post-Hook for %s", p.Name)
 		if err := e.Runner.ExecStream(RenderCmd(p.Post, tplData), p.Name); err != nil {
-			logger.Error("[%s] Post-hook failed: %v", p.Name, err)
+			logger.Warn("[%s] Post-hook failed: %v", p.Name, err)
 			return err
 		}
 	}
@@ -226,39 +219,6 @@ func (e *Engine) InstallOne(p *config.Package) error {
 	return nil
 }
 
-func (e *Engine) getSuperCheckCmd(p *config.Package, pm string) string {
-    namesStr := p.ResolveName(e.Sys)
-    names := strings.Fields(namesStr)
-
-    if len(names) == 0 {
-        return "false"
-    }
-
-    var checkTpl string
-	if pmDef, ok := e.RegisteredPMs[pm]; ok && pmDef.PmCheckTpl != "" {
-		checkTpl = pmDef.PmCheckTpl
-	} else {
-        checkTpl, _, _ = constants.GetPMTemplates(pm)
-        if checkTpl == "" {
-            checkTpl = constants.BaseCheckTemplates[pm]
-        }
-    }
-
-    if checkTpl == "" {
-        return "" // No Template
-    }
-
-    var checks []string
-    for _, name := range names {
-        tplData := map[string]interface{}{
-            "name": name,
-            "vars": e.Vars,
-        }
-        checks = append(checks, RenderCmd(checkTpl, tplData))
-    }
-
-    return strings.Join(checks, " && ")
-}
 
 func (e *Engine) tryInstallCore(p *config.Package, pm string, tplData map[string]interface{}) (bool, error) {
 	realPM := pm
@@ -276,6 +236,12 @@ func (e *Engine) tryInstallCore(p *config.Package, pm string, tplData map[string
 		displayPM = "System"
 	}
 
+	nameForPM := p.ResolveName(e.Sys)
+	systemCheckCmd := e.BuildCheckCmd(targetPM, nameForPM)
+	if systemCheckCmd == "" {
+		systemCheckCmd = "false"
+	}
+
 	isInstalled := false
 
     checkTplData := make(map[string]interface{})
@@ -284,25 +250,18 @@ func (e *Engine) tryInstallCore(p *config.Package, pm string, tplData map[string
     }
 
 	if p.Check != "" {
-        superCheckCmd := e.getSuperCheckCmd(p, realPM)
-        if superCheckCmd == "" {
-            superCheckCmd = "false"
-        }
-
-        if _, ok := checkTplData["super"]; !ok {
-            checkTplData["super"] = make(map[string]interface{})
-        }
-
-        checkTplData["super"].(map[string]interface{})["check"] = superCheckCmd
-
-		if e.Runner.ExecSilent(RenderCmd(p.Check, checkTplData)) == 0 {
+        checkTplData["super"] = map[string]interface{}{
+			"check": systemCheckCmd,
+		}
+		
+		userCheckCmd := RenderCmd(p.Check, checkTplData)
+		if e.Runner.ExecSilent(userCheckCmd) == 0 {
 			isInstalled = true
-        }
+		}
     } else {
-        superCheckCmd := e.getSuperCheckCmd(p, realPM)
-        if superCheckCmd != "" && e.Runner.ExecSilent(superCheckCmd) == 0 {
-            isInstalled = true
-        }
+        if systemCheckCmd != "false" && e.Runner.ExecSilent(systemCheckCmd) == 0 {
+			isInstalled = true
+		}
     }
 
 	if isInstalled {
@@ -334,7 +293,7 @@ func (e *Engine) tryInstallCore(p *config.Package, pm string, tplData map[string
 		} else {
 		    if realPM == "" || realPM == e.Sys.BasePM {
                 nameForInstall := p.ResolveName(e.Sys)
-				installCmd = e.buildSingleInstallCmd(e.Sys.BasePM, nameForInstall)
+				installCmd = e.BuildInstallCmd(e.Sys.BasePM, nameForInstall)
 			} else {
 				return false, fmt.Errorf("unknown PM: %s", realPM)
 			}
@@ -347,41 +306,3 @@ func (e *Engine) tryInstallCore(p *config.Package, pm string, tplData map[string
 
 	return false, nil // Not skipped (Installed), No Error
 }
-
-
-func (e *Engine) buildBatchInstallCmd(basePM string, names []string) string {
-    tpl, ok := constants.BaseBatchTemplates[basePM]
-    if !ok {
-        return basePM + " install " + strings.Join(names, " ")
-    }
-
-    data := map[string]interface{}{
-        "names": strings.Join(names, " "),
-        "vars": e.Vars,
-    }
-    cmd := RenderCmd(tpl, data)
-
-    if constants.PMNeedsSudo[basePM] && !e.IsRoot {
-        return "sudo " + cmd
-    }
-    return cmd
-}
-
-func (e *Engine) buildSingleInstallCmd(basePM, name string) string {
-    tpl, ok := constants.BaseSingleTemplates[basePM]
-    if !ok {
-        return basePM + " install " + name
-    }
-
-    data := map[string]interface{}{
-        "name": name,
-        "vars": e.Vars,
-    }
-    cmd := RenderCmd(tpl, data)
-
-    if constants.PMNeedsSudo[basePM] && !e.IsRoot {
-        return "sudo " + cmd
-    }
-    return cmd
-}
-

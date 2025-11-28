@@ -11,9 +11,9 @@ import (
 	"os"
 	"strings"
 	"sync"
-	"text/tabwriter"
 	"text/template"
 	"time"
+	commone "dotbuilder/internal/errors"
 	"errors"
 )
 
@@ -110,6 +110,7 @@ func ExecuteTaskLogic(t config.Task, runner *shell.Runner, globalVars map[string
 		if action == "skip" {
 			shouldRun = false
 			logger.Success("[%s] Check passed (skipped).", t.ID)
+			return commone.NewSkipError("Check passed")
 		}
 	}
 
@@ -226,7 +227,12 @@ func RunGeneric(nodes []Node, ctx *Context) map[string]NodeResult {
 				
 				status := StatusSuccess
 				if err != nil {
-					status = StatusFailed
+					var skipErr *commone.SkipError
+					if errors.As(err, &skipErr) {
+						status = StatusSkipped
+					} else {
+						status = StatusFailed
+					}
 				}
 
 				for _, id := range ids {
@@ -250,22 +256,20 @@ func RunGeneric(nodes []Node, ctx *Context) map[string]NodeResult {
 				err := node.Execute(ctx)
 				
 				status := StatusSuccess
-				var finalErr error = nil
 
 				if err != nil {
-					if errors.Is(err, pkgmanager.ErrSkipped) {
+					var skipErr *commone.SkipError
+					if errors.As(err, &skipErr) {
 						status = StatusSkipped
-						finalErr = nil 
 					} else {
 						status = StatusFailed
-						finalErr = err
 					}
 				}
 
 				results.Set(node.ID(), NodeResult{
 					ID:        node.ID(),
 					Status:    status,
-					Error:     finalErr,
+					Error:     err,
 					Duration:  time.Since(start),
 					Timestamp: time.Now(),
 				})
@@ -278,44 +282,117 @@ func RunGeneric(nodes []Node, ctx *Context) map[string]NodeResult {
 	return results.m
 }
 
+func truncateString(str string, num int) string {
+	if len(str) > num {
+		return str[0:num-3] + "..."
+	}
+	return str
+}
+
+
 
 func PrintSummary(results map[string]NodeResult, nodes []Node) {
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
-	fmt.Fprintln(w, "ID\tSTATUS\tDURATION\tMESSAGE")
-	fmt.Fprintln(w, "--\t------\t--------\t-------")
+	type rowData struct {
+		id       string
+		status   string
+		duration string
+		message  string
+		rawStat  NodeStatus
+	}
+
+	var rows []rowData
+	headers := []string{"ID", "STATUS", "DURATION", "MESSAGE"}
+	colWidths := []int{len(headers[0]), len(headers[1]), len(headers[2]), len(headers[3])}
 
 	for _, n := range nodes {
 		id := n.ID()
 		res, ok := results[id]
-		if !ok {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", id, "UNKNOWN", "-", "Result not found")
-			continue
-		}
-
-		statusStr := res.Status.String()
-		color := logger.Reset
-		switch res.Status {
-		case StatusSuccess:
-			color = logger.Green
-		case StatusFailed:
-			color = logger.Red
-		case StatusBlocked:
-			color = logger.Yellow
-		case StatusSkipped:
-			color = logger.Cyan
-		}
 		
-		msg := ""
-		if res.Error != nil {
-			msg = res.Error.Error()
+		r := rowData{
+			id:      id,
+			status:  "UNKNOWN",
+			duration: "-",
+			message:  "",
+			rawStat:  StatusPending,
 		}
 
-		fmt.Fprintf(w, "%s\t%s%s%s\t%v\t%s\n", id, color, statusStr, logger.Reset, res.Duration.Round(time.Millisecond), msg)
+		if ok {
+			r.rawStat = res.Status
+			r.status = res.Status.String()
+			r.duration = res.Duration.Round(time.Millisecond).String()
+
+			if res.Error != nil {
+				var skipErr *commone.SkipError
+				if errors.As(res.Error, &skipErr) {
+					r.message = skipErr.Reason
+				} else {
+					r.message = truncateString(res.Error.Error(), 40)
+				}
+			}
+            if r.rawStat == StatusSuccess {
+                r.message = ""
+            }
+		}
+
+		if len(r.id) > colWidths[0] { colWidths[0] = len(r.id) }
+		if len(r.status) > colWidths[1] { colWidths[1] = len(r.status) }
+		if len(r.duration) > colWidths[2] { colWidths[2] = len(r.duration) }
+		if len(r.message) > colWidths[3] { colWidths[3] = len(r.message) }
+
+		rows = append(rows, r)
 	}
-	w.Flush()
+
+	for i := range colWidths {
+		colWidths[i] += 2
+	}
+
+	drawSeparator := func(left, mid, right, line string) {
+		fmt.Print(left)
+		for i, w := range colWidths {
+			fmt.Print(strings.Repeat(line, w))
+			if i < len(colWidths)-1 {
+				fmt.Print(mid)
+			}
+		}
+		fmt.Println(right)
+	}
+
+	drawSeparator("┌", "┬", "┐", "─")
+	fmt.Printf("│ %-*s │ %-*s │ %-*s │ %-*s │\n", 
+		colWidths[0]-2, headers[0], 
+		colWidths[1]-2, headers[1], 
+		colWidths[2]-2, headers[2], 
+		colWidths[3]-2, headers[3])
+	drawSeparator("├", "┼", "┤", "─")
+	for _, row := range rows {
+		colorCode := logger.Reset
+		switch row.rawStat {
+		case StatusSuccess:
+			colorCode = logger.Green
+		case StatusFailed:
+			colorCode = logger.Red
+		case StatusBlocked:
+			colorCode = logger.Yellow
+		case StatusSkipped:
+			colorCode = logger.Cyan
+		}
+		fmt.Printf("│ %-*s │ ", colWidths[0]-2, row.id)
+		
+		fmt.Print(colorCode + row.status + logger.Reset)
+		padding := colWidths[1] - 2 - len(row.status)
+		if padding > 0 {
+			fmt.Print(strings.Repeat(" ", padding))
+		}
+
+		fmt.Printf(" │ %-*s │ %-*s │\n", 
+			colWidths[2]-2, row.duration, 
+			colWidths[3]-2, row.message)
+	}
+	drawSeparator("└", "┴", "┘", "─")
+
 	hasFail := false
-	for _, r := range results {
-		if r.Status == StatusFailed || r.Status == StatusBlocked {
+	for _, r := range rows {
+		if r.rawStat == StatusFailed || r.rawStat == StatusBlocked {
 			hasFail = true
 			break
 		}

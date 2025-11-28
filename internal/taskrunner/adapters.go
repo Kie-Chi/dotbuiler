@@ -68,6 +68,5 @@ func (n *FileNode) Execute(ctx *Context) error {
 	} else {
 		fs = filemanager.RealFS{}
 	}
-    filemanager.ProcessSingleFile(n.File, ctx.Vars, fs, ctx.BaseDir, ctx.Shell)
-    return nil
+    return filemanager.ProcessSingleFile(n.File, ctx.Vars, fs, ctx.BaseDir, ctx.Shell)
 }
