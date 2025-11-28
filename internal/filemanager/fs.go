@@ -38,11 +38,11 @@ func (DryRunFS) MkdirAll(path string, perm os.FileMode) error {
 	return nil
 }
 func (DryRunFS) Symlink(old, new string) error {
-	logger.Info("[DryRun] Symlink %s -> %s", new, old)
+	logger.InfoFile("[DryRun] Symlink %s -> %s", new, old)
 	return nil
 }
 func (DryRunFS) Remove(name string) error {
-	logger.Info("[DryRun] Remove %s", name)
+	logger.InfoFile("[DryRun] Remove %s", name)
 	return nil
 }
 func (DryRunFS) ReadFile(name string) ([]byte, error) {
@@ -65,7 +65,7 @@ func (DryRunFS) Readlink(name string) (string, error) {
 	return os.Readlink(name)
 }
 func (DryRunFS) WriteFile(n string, d []byte, p os.FileMode) error {
-	logger.Info("[DryRun] WriteFile %s (%d bytes)", n, len(d))
+	logger.InfoFile("[DryRun] WriteFile %s (%d bytes)", n, len(d))
 	return nil
 }
 func (DryRunFS) Stat(name string) (fs.FileInfo, error) {

@@ -64,7 +64,7 @@ func (e *Engine) EnsurePMUpdated(pmName string) {
 		return 
 	}
 
-	logger.Info("Updating metadata for PM: %s", pmName)
+	logger.InfoPkg("[%s] Updating metadata...", pmName)
 	unlock := e.acquireLock(pmName)
 	defer unlock()
 
@@ -124,7 +124,7 @@ func (e *Engine) InstallBatch(pmName string, names []string) error {
 	}
 
 	if len(toInstall) == 0 {
-		logger.Info("[%s] All batch items installed, Skipping.", pmName)
+		logger.InfoPkg("[%s] Batch items already installed.", pmName)
 		return errors.NewSkipError("All installed")
 	}
 
@@ -133,7 +133,7 @@ func (e *Engine) InstallBatch(pmName string, names []string) error {
 	unlock := e.acquireLock(pmName)
 	defer unlock()
 
-	logger.Info("Batch installing [%s]: %v", pmName, names)
+	logger.InfoPkg("[%s] Batch installing: %v", pmName, names)
 	cmd := e.BuildBatchInstallCmd(pmName, toInstall)
 	return e.Runner.ExecStream(cmd, fmt.Sprintf("%s-batch", pmName))
 }
@@ -268,7 +268,7 @@ func (e *Engine) tryInstallCore(p *config.Package, pm string, tplData map[string
 		return true, nil // Skipped, No Error
 	}
 
-	logger.Info("Installing %s via %s...", p.Name, displayPM)
+	logger.InfoPkg("Installing %s (%s)...", p.Name, displayPM)
 
     if pm != "none" {
         e.EnsurePMUpdated(targetPM)

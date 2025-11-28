@@ -116,7 +116,7 @@ func ExecuteTaskLogic(t config.Task, runner *shell.Runner, globalVars map[string
 
 	if shouldRun {
 		runCmd := pkgmanager.RenderCmd(t.Run, tplData)
-		logger.Info("Running Task: [%s]", t.ID)
+		logger.InfoTask("Running [%s]", t.ID)
 		if err := runner.ExecStream(runCmd, t.ID); err != nil {
 			return err
 		}
@@ -126,8 +126,6 @@ func ExecuteTaskLogic(t config.Task, runner *shell.Runner, globalVars map[string
 }
 
 func RunGeneric(nodes []Node, ctx *Context) map[string]NodeResult {
-	logger.Info("=== Start Generic DAG Execution ===")
-
 	results := &ResultMap{m: make(map[string]NodeResult)}
 	
 	// 1. Build DAG

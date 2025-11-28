@@ -75,7 +75,7 @@ func ProcessSingleFile(f config.File, vars map[string]string, fs FileSystem, bas
 		src = filepath.Join(baseDir, src)
 	}
 
-	logger.Info("FileOp: %s -> %s", dest, src)
+	logger.InfoFile("%s -> %s", dest, src)
 
 	var srcContent []byte
 	var err error
@@ -117,7 +117,7 @@ func ProcessSingleFile(f config.File, vars map[string]string, fs FileSystem, bas
 
 	if f.Append {
 		if !destExists {
-			logger.Info("  Target does not exist, creating new file (Append mode).")
+			logger.InfoFile("Creating new file (Append): %s", dest)
 			if err := fs.WriteFile(dest, srcContent, 0644); err != nil {
 				logger.Error("  Write failed: %v", err)
 				return err
@@ -137,7 +137,7 @@ func ProcessSingleFile(f config.File, vars map[string]string, fs FileSystem, bas
 			return errors.NewSkipError("Content exists")
 		}
 
-		logger.Info("  Appending content to target...")
+		logger.InfoFile("Appending content to: %s", dest)
 		if len(destContent) > 0 && destContent[len(destContent)-1] != '\n' {
 			destContent = append(destContent, '\n')
 		}
@@ -173,7 +173,7 @@ func ProcessSingleFile(f config.File, vars map[string]string, fs FileSystem, bas
 			return errors.NewSkipError("Target exists")
 		}
 
-		logger.Info("  Removing existing target for override.")
+		logger.InfoFile("Removing existing target: %s", dest)
 		fs.Remove(dest)
 	}
 
@@ -217,30 +217,4 @@ func expandPath(path, home string) string {
 		return filepath.Join(home, path[1:])
 	}
 	return path
-}
-
-func renderTemplateFile(src, dest string, data map[string]string, fs FileSystem) error {
-	b, err := fs.ReadFile(src)
-	if err != nil {
-		return err
-	}
-	tplData := map[string]interface{}{"vars": data}
-	tmpl, err := template.New("file").Parse(string(b))
-	if err != nil {
-		return err
-	}
-
-	// Prepare buffer to write
-	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, tplData); err != nil {
-		return err
-	}
-
-	// Check source perms
-	var mode os.FileMode = 0644
-	if info, err := fs.Stat(src); err == nil {
-		mode = info.Mode().Perm()
-	}
-
-	return fs.WriteFile(dest, buf.Bytes(), mode)
 }
