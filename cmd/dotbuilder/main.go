@@ -17,7 +17,12 @@ import (
 )
 
 func main() {
-	configFile := flag.String("c", "configs/construct.yaml", "Path to configuration file")
+	home, err := os.UserHomeDir()
+	if err != nil {
+		logger.Error("Failed to get user home directory: %v", err)
+	}
+	defFile := filepath.Join(home, ".dotfiles", "configs", "config.yml")
+	configFile := flag.String("c", defFile, "Path to configuration file")
 	debug := flag.Bool("debug", false, "Enable debug logs")
 	var dryRun bool
 	flag.BoolVar(&dryRun, "n", false, "Dry-run mode")
