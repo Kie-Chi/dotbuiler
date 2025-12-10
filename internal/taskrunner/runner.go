@@ -127,7 +127,7 @@ func ExecuteTaskLogic(t config.Task, runner *shell.Runner, globalVars map[string
 
 func RunGeneric(nodes []Node, ctx *Context) map[string]NodeResult {
 	results := &ResultMap{m: make(map[string]NodeResult)}
-	
+
 	// 1. Build DAG
 	g := dag.New()
 	nodeMap := make(map[string]Node)
@@ -167,7 +167,7 @@ func RunGeneric(nodes []Node, ctx *Context) map[string]NodeResult {
 
 		for _, id := range layer {
 			n := nodeMap[id]
-			
+
 			isBlocked := false
 			var failedDep string
 
@@ -220,9 +220,9 @@ func RunGeneric(nodes []Node, ctx *Context) map[string]NodeResult {
 			go func(pm string, pkgNames []string, ids []string) {
 				defer wg.Done()
 				start := time.Now()
-				
+
 				err := ctx.PkgManager.InstallBatch(pm, pkgNames)
-				
+
 				status := StatusSuccess
 				if err != nil {
 					var skipErr *commone.SkipError
@@ -250,9 +250,9 @@ func RunGeneric(nodes []Node, ctx *Context) map[string]NodeResult {
 			go func(node Node) {
 				defer wg.Done()
 				start := time.Now()
-				
+
 				err := node.Execute(ctx)
-				
+
 				status := StatusSuccess
 
 				if err != nil {
@@ -305,7 +305,7 @@ func PrintSummary(results map[string]NodeResult, nodes []Node) {
 	for _, n := range nodes {
 		id := n.ID()
 		res, ok := results[id]
-		
+
 		r := rowData{
 			id:      id,
 			status:  "UNKNOWN",
@@ -356,10 +356,10 @@ func PrintSummary(results map[string]NodeResult, nodes []Node) {
 	}
 
 	drawSeparator("┌", "┬", "┐", "─")
-	fmt.Printf("│ %-*s │ %-*s │ %-*s │ %-*s │\n", 
-		colWidths[0]-2, headers[0], 
-		colWidths[1]-2, headers[1], 
-		colWidths[2]-2, headers[2], 
+	fmt.Printf("│ %-*s │ %-*s │ %-*s │ %-*s │\n",
+		colWidths[0]-2, headers[0],
+		colWidths[1]-2, headers[1],
+		colWidths[2]-2, headers[2],
 		colWidths[3]-2, headers[3])
 	drawSeparator("├", "┼", "┤", "─")
 	for _, row := range rows {
@@ -375,27 +375,33 @@ func PrintSummary(results map[string]NodeResult, nodes []Node) {
 			colorCode = logger.Cyan
 		}
 		fmt.Printf("│ %-*s │ ", colWidths[0]-2, row.id)
-		
+
 		fmt.Print(colorCode + row.status + logger.Reset)
 		padding := colWidths[1] - 2 - len(row.status)
 		if padding > 0 {
 			fmt.Print(strings.Repeat(" ", padding))
 		}
 
-		fmt.Printf(" │ %-*s │ %-*s │\n", 
-			colWidths[2]-2, row.duration, 
+		fmt.Printf(" │ %-*s │ %-*s │\n",
+			colWidths[2]-2, row.duration,
 			colWidths[3]-2, row.message)
 	}
 	drawSeparator("└", "┴", "┘", "─")
 
-	hasFail := false
-	for _, r := range rows {
-		if r.rawStat == StatusFailed || r.rawStat == StatusBlocked {
-			hasFail = true
-			break
-		}
-	}
-	if hasFail {
-		logger.Error("Build finished with errors.")
-	}
+    var failures []NodeResult
+    for _, n := range nodes {
+        if res, ok := results[n.ID()]; ok {
+            if res.Status == StatusFailed || res.Status == StatusBlocked {
+                failures = append(failures, res)
+            }
+        }
+    }
+
+    if len(failures) > 0 {
+        fmt.Println("\n=== Failure Details ===")
+        for _, f := range failures {
+            logger.Error("[%s] Full Error: %v", f.ID, f.Error)
+        }
+        logger.Error("Build finished with errors.")
+    }
 }
