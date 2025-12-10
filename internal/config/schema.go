@@ -8,11 +8,12 @@ import (
 )
 
 type Config struct {
-	Meta  Meta              `yaml:"meta"`
-	Vars  map[string]string `yaml:"vars"`
-	Pkgs  []Package         `yaml:"pkgs"`
-	Files []File            `yaml:"files"`
-	Tasks []Task            `yaml:"tasks"`
+	Meta  Meta              	`yaml:"meta"`
+	Vars  map[string]string 	`yaml:"vars"`
+	Scrpits map[string]string   `yaml:"scripts"`
+	Pkgs  []Package         	`yaml:"pkgs"`
+	Files []File            	`yaml:"files"`
+	Tasks []Task            	`yaml:"tasks"`
 }
 
 type Meta struct {

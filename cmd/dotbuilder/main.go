@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"text/template"
 	"time"
+	"os"
 )
 
 func main() {
@@ -71,9 +72,21 @@ func main() {
 	resolveVariables(vars)
 	resolvePackageDefs(cfg.Pkgs, vars)
 
+	scriptDir, err := pkgmanager.Prepare(cfg.Scrpits, vars)	
+	if err != nil {
+		logger.Error("Failed to prepare helper scripts: %v", err)
+	}
+
 	// Engine Init
 	pmEngine := pkgmanager.NewEngine(sysInfo, vars, isRoot, dryRun)
 	pmEngine.RegisterCustomPMs(cfg.Pkgs)
+
+	if scriptDir != "" {
+        currentPath := os.Getenv("PATH")
+        newPath := scriptDir + string(os.PathListSeparator) + currentPath        
+        pmEngine.Runner.Env["PATH"] = newPath
+        logger.Debug("Injected scripts to PATH: %s", scriptDir)
+    }
 
 	ctx := &taskrunner.Context{
 		Shell:      pmEngine.Runner,
