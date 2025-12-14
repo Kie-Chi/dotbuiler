@@ -60,12 +60,18 @@ func main() {
 		}()
 	}
 
-    logger.Info("Environment: OS=%s, User=%s, Home=%s", sysInfo.OS, sysInfo.User, sysInfo.Home)
+    logger.Info("Environment: OS=%s, Arch=%s, Distro=%s, PM=%s", sysInfo.OS, sysInfo.Arch, sysInfo.Distro, sysInfo.BasePM)
 
 	vars := cfg.Vars
 	if vars == nil { vars = make(map[string]string) }
-	vars["OS"] = sysInfo.OS
-	vars["DISTRO"] = sysInfo.Distro
+	vars["OS"] = sysInfo.OS // just alias
+	vars["DISTRO"] = sysInfo.Distro // just alias
+	vars["sys_os"] = sysInfo.OS
+	vars["sys_distro"] = sysInfo.Distro
+	vars["sys_arch"] = sysInfo.Arch
+	vars["sys_pm"] = sysInfo.BasePM
+	vars["sys_home"] = sysInfo.Home
+	vars["sys_user"] = sysInfo.User
 
     if _, ok := vars["home"]; !ok {
 		vars["home"] = sysInfo.Home

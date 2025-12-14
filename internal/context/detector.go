@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
     "os/user"
+	"runtime"
 )
 
 type SystemInfo struct {
@@ -14,10 +15,14 @@ type SystemInfo struct {
 	BasePM string // e.g., "apt-get", "pacman"
     User   string // e.g., chi
     Home   string // e.g., home/chi
+	Arch   string // e.g., "amd64", "arm64"
 }
 
 func Detect() *SystemInfo {
-	info := &SystemInfo{OS: "linux"}
+	info := &SystemInfo{
+		OS: "linux",
+		Arch: runtime.GOARCH,
+	}
 
     u, err := user.Current()
 	if err == nil {
