@@ -59,6 +59,10 @@ func main() {
 		".env",                           // Priority: cwd/.env
 	}
 
+	for _, ef := range envFiles {
+		loadEnvFile(ef, cfg.Vars)
+	}
+
 	for _, e := range os.Environ() {
 		pair := strings.SplitN(e, "=", 2)
 		if len(pair) == 2 {
@@ -67,10 +71,6 @@ func main() {
 
 			cfg.Vars[key] = val
 		}
-	}
-
-	for _, ef := range envFiles {
-		loadEnvFile(ef, cfg.Vars)
 	}
 
 	if *debug {
