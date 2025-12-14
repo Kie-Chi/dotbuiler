@@ -277,7 +277,7 @@ func loadEnvFile(path string, vars map[string]string) {
 				}
 			}
 			vars[key] = val
-			logger.Debug("Loaded var [env_%s] from file", key)
+			logger.Debug("Loaded var [%s] from file", key)
 		}
 	}
 }
