@@ -14,6 +14,8 @@ import (
 	"text/template"
 	"time"
 	"os"
+	"bufio"
+	"strings"
 )
 
 func main() {
@@ -61,6 +63,20 @@ func main() {
 	}
 
     logger.Info("Environment: OS=%s, Arch=%s, Distro=%s, PM=%s", sysInfo.OS, sysInfo.Arch, sysInfo.Distro, sysInfo.BasePM)
+
+	loadEnvFile(".env", cfg.Vars) 
+    loadEnvFile("my.env", cfg.Vars)
+    for _, e := range os.Environ() {
+        pair := strings.SplitN(e, "=", 2)
+        if len(pair) == 2 {
+            key := pair[0]
+            val := pair[1]
+            if _, exists := cfg.Vars[key]; !exists {
+                cfg.Vars[key] = val
+            }
+            cfg.Vars["env_"+key] = val
+        }
+    }
 
 	vars := cfg.Vars
 	if vars == nil { vars = make(map[string]string) }
@@ -198,4 +214,26 @@ func resolvePackageDefs(pkgs []config.Package, vars map[string]string) {
 			pkgs[i].Map[k] = render(v)
 		}
 	}
+}
+
+func loadEnvFile(filename string, vars map[string]string) {
+    file, err := os.Open(filename)
+    if err != nil {
+        return
+    }
+    defer file.Close()
+
+    scanner := bufio.NewScanner(file)
+    for scanner.Scan() {
+        line := strings.TrimSpace(scanner.Text())
+        if line == "" || strings.HasPrefix(line, "#") {
+            continue
+        }
+        parts := strings.SplitN(line, "=", 2)
+        if len(parts) == 2 {
+            if _, exists := vars[parts[0]]; !exists {
+                vars[parts[0]] = parts[1]
+            }
+        }
+    }
 }
