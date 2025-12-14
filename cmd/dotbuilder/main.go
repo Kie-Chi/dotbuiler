@@ -46,6 +46,50 @@ func main() {
 	}
 	baseDir := filepath.Dir(absConfigPath)
 
+	// Ensure Vars map is initialized
+	if cfg.Vars == nil {
+		cfg.Vars = make(map[string]string)
+	}
+
+
+	envFiles := []string{
+		filepath.Join(baseDir, "my.env"), // Priority: config_dir/my.env
+		filepath.Join(baseDir, ".env"),   // Priority: config_dir/.env
+		"my.env",                         // Priority: cwd/my.env
+		".env",                           // Priority: cwd/.env
+	}
+
+	for _, e := range os.Environ() {
+		pair := strings.SplitN(e, "=", 2)
+		if len(pair) == 2 {
+			key := pair[0]
+			val := pair[1]
+			
+			cfg.Vars["env_" + key] = val
+		}
+	}
+
+	for _, ef := range envFiles {
+		loadEnvFile(ef, cfg.Vars)
+	}
+
+	if *debug {
+		logger.Debug("------ FINAL VARIABLES DUMP ------")
+		for k, v := range cfg.Vars {
+			displayVal := v
+			lowerK := strings.ToLower(k)
+			if shouldMask(lowerK) {
+				if len(v) > 3 {
+					displayVal = v[:3] + "***"
+				} else {
+					displayVal = "***"
+				}
+			}
+			logger.Debug("[%s] = %s", k, displayVal)
+		}
+		logger.Debug("----------------------------------")
+	}
+
 	sysInfo := context.Detect()
 	isRoot := context.IsRoot()
 
@@ -63,20 +107,6 @@ func main() {
 	}
 
     logger.Info("Environment: OS=%s, Arch=%s, Distro=%s, PM=%s", sysInfo.OS, sysInfo.Arch, sysInfo.Distro, sysInfo.BasePM)
-
-	loadEnvFile(".env", cfg.Vars) 
-    loadEnvFile("my.env", cfg.Vars)
-    for _, e := range os.Environ() {
-        pair := strings.SplitN(e, "=", 2)
-        if len(pair) == 2 {
-            key := pair[0]
-            val := pair[1]
-            if _, exists := cfg.Vars[key]; !exists {
-                cfg.Vars[key] = val
-            }
-            cfg.Vars["env_"+key] = val
-        }
-    }
 
 	vars := cfg.Vars
 	if vars == nil { vars = make(map[string]string) }
@@ -216,24 +246,48 @@ func resolvePackageDefs(pkgs []config.Package, vars map[string]string) {
 	}
 }
 
-func loadEnvFile(filename string, vars map[string]string) {
-    file, err := os.Open(filename)
-    if err != nil {
-        return
-    }
-    defer file.Close()
+func loadEnvFile(path string, vars map[string]string) {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return
+	}
 
-    scanner := bufio.NewScanner(file)
-    for scanner.Scan() {
-        line := strings.TrimSpace(scanner.Text())
-        if line == "" || strings.HasPrefix(line, "#") {
-            continue
-        }
-        parts := strings.SplitN(line, "=", 2)
-        if len(parts) == 2 {
-            if _, exists := vars[parts[0]]; !exists {
-                vars[parts[0]] = parts[1]
-            }
-        }
-    }
+	logger.Info("Loading .env: %s", path)
+	f, err := os.Open(path)
+	if err != nil {
+		logger.Warn("Failed to open .env: %v", err)
+		return
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) == 2 {
+			key := strings.TrimSpace(parts[0])
+			val := strings.TrimSpace(parts[1])			
+			if len(val) >= 2 {
+				q := val[0]
+				if (q == '"' || q == '\'') && val[len(val)-1] == q {
+					val = val[1 : len(val)-1]
+				}
+			}
+			vars["env_" + key] = val
+			logger.Debug("Loaded var [env_%s] from file", key)
+		}
+	}
+}
+
+func shouldMask(key string) bool {
+	sensitive := []string{"secret", "key", "token", "password", "pwd", "auth"}
+	for _, s := range sensitive {
+		if strings.Contains(key, s) {
+			return true
+		}
+	}
+	return false
 }
