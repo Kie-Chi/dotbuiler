@@ -21,7 +21,7 @@ func main() {
 	if err != nil {
 		logger.Error("Failed to get user home directory: %v", err)
 	}
-	defFile := filepath.Join(home, ".dotfiles", "configs", "config.yml")
+	defFile := filepath.Join(home, ".dotfiles", "config.yml")
 	configFile := flag.String("c", defFile, "Path to configuration file")
 	debug := flag.Bool("debug", false, "Enable debug logs")
 	var dryRun bool
