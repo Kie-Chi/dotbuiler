@@ -7,6 +7,8 @@ import (
 	"gopkg.in/yaml.v3"
 	"path/filepath"
 	"fmt"
+	"strings"
+	"sort"
 )
 
 type Config struct {
@@ -149,24 +151,58 @@ func loadRecursive(path string, visited map[string]bool) (*Config, error) {
 		return nil, fmt.Errorf("failed to parse %s: %w", path, err)
 	}
 
-	if currentCfg.Vars == nil { currentCfg.Vars = make(map[string]string) }
-	if currentCfg.Scrpits == nil { currentCfg.Scrpits = make(map[string]string) }
-	
-	if len(currentCfg.Include) == 0 {
-		return &currentCfg, nil
+	if currentCfg.Vars == nil {
+		currentCfg.Vars = make(map[string]string)
 	}
+	if currentCfg.Scrpits == nil {
+		currentCfg.Scrpits = make(map[string]string)
+	}
+	
 	finalConfig := &Config{
 		Vars:    make(map[string]string),
 		Scrpits: make(map[string]string),
 	}
+	
 	baseDir := filepath.Dir(path)
 	for _, includePath := range currentCfg.Include {
 		absIncludePath := filepath.Join(baseDir, includePath)
-		includedCfg, err := loadRecursive(absIncludePath, visited)
+		
+		info, err := os.Stat(absIncludePath)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("include path not found: %s (referenced in %s)", includePath, path)
 		}
-		mergeConfigs(finalConfig, includedCfg)
+
+		// If the include path is a directory, process all .yml/.yaml files within it.
+		if info.IsDir() {
+			entries, err := os.ReadDir(absIncludePath)
+			if err != nil {
+				return nil, fmt.Errorf("could not read include directory %s: %w", absIncludePath, err)
+			}
+
+			var filesToInclude []string
+			for _, entry := range entries {
+				name := entry.Name()
+				if !entry.IsDir() && (strings.HasSuffix(name, ".yml") || strings.HasSuffix(name, ".yaml")) {
+					filesToInclude = append(filesToInclude, filepath.Join(absIncludePath, name))
+				}
+			}
+
+			// Sort files alphabetically for deterministic loading order.
+			sort.Strings(filesToInclude)
+			for _, filePath := range filesToInclude {
+				includedCfg, err := loadRecursive(filePath, visited)
+				if err != nil {
+					return nil, err // Propagate error
+				}
+				mergeConfigs(finalConfig, includedCfg)
+			}
+		} else { // Otherwise, it's a single file.
+			includedCfg, err := loadRecursive(absIncludePath, visited)
+			if err != nil {
+				return nil, err
+			}
+			mergeConfigs(finalConfig, includedCfg)
+		}
 	}
 	mergeConfigs(finalConfig, &currentCfg)
 	return finalConfig, nil

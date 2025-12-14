@@ -3,6 +3,8 @@ package dag
 import (
 	"errors"
 	"sort"
+	"fmt"
+	"strings"
 )
 
 // Graph adjacency list
@@ -64,13 +66,10 @@ func (g *Graph) SortLayers(items []string) ([][]string, error) {
 		inDegree[id] = 0
 	}
 
-	// Fill data based on dependencies
-	// g.Nodes[child] = [parent1, parent2...]
 	for _, child := range items {
 		parents := g.Nodes[child]
-		inDegree[child] = len(parents) // Node has N dependencies
+		inDegree[child] = len(parents)
 		for _, p := range parents {
-			// Record that Parent points to Child
 			adj[p] = append(adj[p], child)
 		}
 	}
@@ -83,19 +82,16 @@ func (g *Graph) SortLayers(items []string) ([][]string, error) {
 			queue = append(queue, id)
 		}
 	}
-	sort.Strings(queue) // Sort for deterministic behavior
+	sort.Strings(queue)
 
 	processedCount := 0
 
 	for len(queue) > 0 {
-		layers = append(layers, queue) // Add current layer
+		layers = append(layers, queue)
 		processedCount += len(queue)
 		
 		var nextQueue []string
-
-		// Process current layer
 		for _, u := range queue {
-			// 'u' is completed, now verify its children
 			for _, v := range adj[u] {
 				inDegree[v]--
 				if inDegree[v] == 0 {
@@ -108,8 +104,20 @@ func (g *Graph) SortLayers(items []string) ([][]string, error) {
 	}
 
 	if processedCount != len(items) {
-		return nil, errors.New("detected cycle in dependency graph")
+		var cycleNodes []string
+		for id, d := range inDegree {
+			if d > 0 {
+				cycleNodes = append(cycleNodes, id)
+			}
+		}
+		sort.Strings(cycleNodes) // Sort for consistent output
+		
+		// Return a much more informative error.
+		errorMsg := fmt.Sprintf(
+			"detected cycle in dependency graph involving nodes: [%s]",
+			strings.Join(cycleNodes, ", "),
+		)
+		return nil, errors.New(errorMsg)
 	}
-
 	return layers, nil
 }

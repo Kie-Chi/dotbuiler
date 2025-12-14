@@ -135,6 +135,10 @@ func RunGeneric(nodes []Node, ctx *Context) map[string]NodeResult {
 
 	for _, n := range nodes {
 		id := n.ID()
+		if _, exists := nodeMap[id]; exists {
+			logger.Error("Duplicate node ID detected: '%s'. Node IDs must be unique across all packages, tasks, and file 'id' fields.", id)
+			os.Exit(1)
+		}
 		nodeMap[id] = n
 		ids = append(ids, id)
 	}
