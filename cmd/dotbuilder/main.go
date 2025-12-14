@@ -64,8 +64,8 @@ func main() {
 		if len(pair) == 2 {
 			key := pair[0]
 			val := pair[1]
-			
-			cfg.Vars["env_" + key] = val
+
+			cfg.Vars[key] = val
 		}
 	}
 
@@ -129,7 +129,7 @@ func main() {
 	resolveVariables(vars)
 	resolvePackageDefs(cfg.Pkgs, vars)
 
-	scriptDir, err := pkgmanager.Prepare(cfg.Scrpits, vars)	
+	scriptDir, err := pkgmanager.Prepare(cfg.Scrpits, vars)
 	if err != nil {
 		logger.Error("Failed to prepare helper scripts: %v", err)
 	}
@@ -140,7 +140,7 @@ func main() {
 
 	if scriptDir != "" {
         currentPath := os.Getenv("PATH")
-        newPath := scriptDir + string(os.PathListSeparator) + currentPath        
+        newPath := scriptDir + string(os.PathListSeparator) + currentPath
         pmEngine.Runner.Env["PATH"] = newPath
         logger.Debug("Injected scripts to PATH: %s", scriptDir)
     }
@@ -265,18 +265,18 @@ func loadEnvFile(path string, vars map[string]string) {
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		
+
 		parts := strings.SplitN(line, "=", 2)
 		if len(parts) == 2 {
 			key := strings.TrimSpace(parts[0])
-			val := strings.TrimSpace(parts[1])			
+			val := strings.TrimSpace(parts[1])
 			if len(val) >= 2 {
 				q := val[0]
 				if (q == '"' || q == '\'') && val[len(val)-1] == q {
 					val = val[1 : len(val)-1]
 				}
 			}
-			vars["env_" + key] = val
+			vars[key] = val
 			logger.Debug("Loaded var [env_%s] from file", key)
 		}
 	}
