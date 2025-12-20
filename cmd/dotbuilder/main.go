@@ -73,23 +73,6 @@ func main() {
 		}
 	}
 
-	if *debug {
-		logger.Debug("------ FINAL VARIABLES DUMP ------")
-		for k, v := range cfg.Vars {
-			displayVal := v
-			lowerK := strings.ToLower(k)
-			if shouldMask(lowerK) {
-				if len(v) > 3 {
-					displayVal = v[:3] + "***"
-				} else {
-					displayVal = "***"
-				}
-			}
-			logger.Debug("[%s] = %s", k, displayVal)
-		}
-		logger.Debug("----------------------------------")
-	}
-
 	sysInfo := context.Detect()
 	isRoot := context.IsRoot()
 
@@ -110,6 +93,7 @@ func main() {
 
 	vars := cfg.Vars
 	if vars == nil { vars = make(map[string]string) }
+	vars["dotfiles"] = baseDir
 	vars["OS"] = sysInfo.OS // just alias
 	vars["DISTRO"] = sysInfo.Distro // just alias
 	vars["sys_os"] = sysInfo.OS
@@ -128,6 +112,23 @@ func main() {
 
 	resolveVariables(vars)
 	resolvePackageDefs(cfg.Pkgs, vars)
+
+	if *debug {
+		logger.Debug("------ FINAL VARIABLES DUMP ------")
+		for k, v := range vars {
+			displayVal := v
+			lowerK := strings.ToLower(k)
+			if shouldMask(lowerK) {
+				if len(v) > 3 {
+					displayVal = v[:3] + "***"
+				} else {
+					displayVal = "***"
+				}
+			}
+			logger.Debug("[%s] = %s", k, displayVal)
+		}
+		logger.Debug("----------------------------------")
+	}
 
 	scriptDir, err := pkgmanager.Prepare(cfg.Scrpits, vars)
 	if err != nil {
