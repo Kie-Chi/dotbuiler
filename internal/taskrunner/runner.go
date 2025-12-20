@@ -284,6 +284,61 @@ func RunGeneric(nodes []Node, ctx *Context) map[string]NodeResult {
 	return results.m
 }
 
+func RunPhased(nodes []Node, ctx *Context) map[string]NodeResult {
+    stages := map[string][]Node{
+        "boot":    {},
+        "default": {},
+        "end":     {},
+    }
+
+    for _, n := range nodes {
+        g := n.Group()
+        if _, ok := stages[g]; !ok {
+            g = "default" // default
+        }
+        stages[g] = append(stages[g], n)
+    }
+
+    order := []string{"boot", "default", "end"}
+    allResults := make(map[string]NodeResult)
+    previousStageFailed := false
+
+    for _, stageName := range order {
+        stageNodes := stages[stageName]
+        if len(stageNodes) == 0 {
+            continue
+        }
+
+        logger.Info("=== Entering Stage: %s (%d nodes) ===", stageName, len(stageNodes))
+        if previousStageFailed {
+            for _, n := range stageNodes {
+                allResults[n.ID()] = NodeResult{
+                    ID:     n.ID(),
+                    Status: StatusBlocked,
+                    Error:  fmt.Errorf("blocked by failure in previous stage"),
+                }
+            }
+            continue
+        }
+
+        stageResults := RunGeneric(stageNodes, ctx)
+        hasFailure := false
+        for id, res := range stageResults {
+            allResults[id] = res
+            if res.Status == StatusFailed {
+                hasFailure = true
+            }
+        }
+
+        if hasFailure {
+            logger.Error("Stage [%s] failed. Blocking subsequent stages.", stageName)
+            previousStageFailed = true
+        }
+    }
+
+    return allResults
+}
+
 func truncateString(str string, num int) string {
 	if len(str) > num {
 		return str[0:num-3] + "..."

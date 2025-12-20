@@ -26,6 +26,11 @@ func (n *PkgNode) BatchGroup() string {
 	return ""
 }
 
+func (n *PkgNode) Group() string {
+    if n.Pkg.Group == "" { return "default" }
+    return n.Pkg.Group
+}
+
 func (n *PkgNode) GetBatchItem() string {
     return n.Pkg.ResolveName(n.Mgr.Sys)
 }
@@ -46,6 +51,10 @@ type TaskNode struct {
 func (n *TaskNode) ID() string     { return n.Task.ID }
 func (n *TaskNode) Deps() []string { return n.Task.Deps }
 func (n *TaskNode) BatchGroup() string { return "" }
+func (n *TaskNode) Group() string {
+    if n.Task.Group == "" { return "default" }
+    return n.Task.Group
+}
 
 func (n *TaskNode) Execute(ctx *Context) error {
 	return ExecuteTaskLogic(n.Task, ctx.Shell, ctx.Vars)
@@ -60,6 +69,10 @@ type FileNode struct {
 func (n *FileNode) ID() string { return n.Id }
 func (n *FileNode) Deps() []string { return n.File.Deps }
 func (n *FileNode) BatchGroup() string { return "" }
+func (n *FileNode) Group() string {
+    if n.File.Group == "" { return "default" }
+    return n.File.Group
+}
 
 func (n *FileNode) Execute(ctx *Context) error {
 	var fs filemanager.FileSystem

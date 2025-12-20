@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"dotbuilder/internal/config"
 	"dotbuilder/internal/context"
@@ -9,21 +10,68 @@ import (
 	"dotbuilder/pkg/logger"
 	"flag"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"text/template"
 	"time"
-	"os"
-	"bufio"
-	"strings"
 )
 
+type flags struct {
+	configFile string
+	debug      bool
+	dryRun     bool
+}
+
 func main() {
+	flags := parseFlags()
+	cfg, baseDir := loadConfig(flags.configFile)
+	sysInfo, isRoot, vars := initializeVars(cfg, baseDir)
+
+	// Setup sudo refresh for non-root users
+	if !isRoot && !flags.dryRun {
+		setupSudoRefresh()
+	}
+
+	logger.Info("Environment: OS=%s, Arch=%s, Distro=%s, PM=%s", sysInfo.OS, sysInfo.Arch, sysInfo.Distro, sysInfo.BasePM)
+
+	// Resolve variables and package definitions
+	resolveVariables(vars)
+	resolvePackageDefs(cfg.Pkgs, vars)
+
+	// Debug dump
+	if flags.debug {
+		dumpVariables(vars)
+	}
+
+	// Prepare package manager
+	pmEngine := preparePackageManager(cfg, sysInfo, vars, isRoot, flags.dryRun)
+
+	// Create execution context
+	ctx := &taskrunner.Context{
+		Shell:      pmEngine.Runner,
+		PkgManager: pmEngine,
+		Vars:       vars,
+		BaseDir:    baseDir,
+	}
+
+	// Build task nodes
+	nodes := buildTaskNodes(cfg, pmEngine)
+
+	// Execute tasks
+	results := taskrunner.RunPhased(nodes, ctx)
+	taskrunner.PrintSummary(results, nodes)
+	logger.Success("All build tasks completed")
+}
+
+func parseFlags() flags {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		logger.Error("Failed to get user home directory: %v", err)
 	}
 	defFile := filepath.Join(home, ".dotfiles", "config.yml")
+
 	configFile := flag.String("c", defFile, "Path to configuration file")
 	debug := flag.Bool("debug", false, "Enable debug logs")
 	var dryRun bool
@@ -31,16 +79,25 @@ func main() {
 	flag.BoolVar(&dryRun, "dry-run", false, "Dry-run mode")
 	flag.Parse()
 
-	if *debug { logger.SetDebug(true) }
+	if *debug {
+		logger.SetDebug(true)
+	}
 
-	logger.Info("Load configuration: %s", *configFile)
-	cfg, err := config.Load(*configFile)
+	return flags{
+		configFile: *configFile,
+		debug:      *debug,
+		dryRun:     dryRun,
+	}
+}
+
+func loadConfig(configFile string) (*config.Config, string) {
+	logger.Info("Load configuration: %s", configFile)
+	cfg, err := config.Load(configFile)
 	if err != nil {
 		logger.Error("Failed to load configuration: %v", err)
 	}
 
-	// Determine the base directory of the config file
-	absConfigPath, err := filepath.Abs(*configFile)
+	absConfigPath, err := filepath.Abs(configFile)
 	if err != nil {
 		logger.Error("Failed to resolve config path: %v", err)
 	}
@@ -51,51 +108,42 @@ func main() {
 		cfg.Vars = make(map[string]string)
 	}
 
-
+	// Load environment files
 	envFiles := []string{
-		filepath.Join(baseDir, "my.env"), // Priority: config_dir/my.env
-		filepath.Join(baseDir, ".env"),   // Priority: config_dir/.env
-		"my.env",                         // Priority: cwd/my.env
-		".env",                           // Priority: cwd/.env
+		filepath.Join(baseDir, "my.env"),
+		filepath.Join(baseDir, ".env"),
+		"my.env",
+		".env",
 	}
 
 	for _, ef := range envFiles {
 		loadEnvFile(ef, cfg.Vars)
 	}
 
+	// Load system environment variables
 	for _, e := range os.Environ() {
 		pair := strings.SplitN(e, "=", 2)
 		if len(pair) == 2 {
-			key := pair[0]
-			val := pair[1]
-
-			cfg.Vars[key] = val
+			cfg.Vars[pair[0]] = pair[1]
 		}
 	}
 
+	return cfg, baseDir
+}
+
+func initializeVars(cfg *config.Config, baseDir string) (*context.SystemInfo, bool, map[string]string) {
 	sysInfo := context.Detect()
 	isRoot := context.IsRoot()
 
-	if !isRoot && !dryRun {
-		logger.Info("Refreshing sudo credentials...")
-		if err := exec.Command("sudo", "-v").Run(); err != nil {
-			logger.Error("Failed to refresh sudo credentials. Please run as root or ensure sudo works without password.")
-		}
-		go func() {
-			ticker := time.NewTicker(4 * time.Minute)
-			for range ticker.C {
-				exec.Command("sudo", "-v").Run()
-			}
-		}()
+	vars := cfg.Vars
+	if vars == nil {
+		vars = make(map[string]string)
 	}
 
-    logger.Info("Environment: OS=%s, Arch=%s, Distro=%s, PM=%s", sysInfo.OS, sysInfo.Arch, sysInfo.Distro, sysInfo.BasePM)
-
-	vars := cfg.Vars
-	if vars == nil { vars = make(map[string]string) }
+	// Set base directories and system info
 	vars["dotfiles"] = baseDir
-	vars["OS"] = sysInfo.OS // just alias
-	vars["DISTRO"] = sysInfo.Distro // just alias
+	vars["OS"] = sysInfo.OS
+	vars["DISTRO"] = sysInfo.Distro
 	vars["sys_os"] = sysInfo.OS
 	vars["sys_distro"] = sysInfo.Distro
 	vars["sys_arch"] = sysInfo.Arch
@@ -103,69 +151,79 @@ func main() {
 	vars["sys_home"] = sysInfo.Home
 	vars["sys_user"] = sysInfo.User
 
-    if _, ok := vars["home"]; !ok {
+	// Set defaults if not already set
+	if _, ok := vars["home"]; !ok {
 		vars["home"] = sysInfo.Home
 	}
 	if _, ok := vars["user"]; !ok {
 		vars["user"] = sysInfo.User
 	}
 
-	resolveVariables(vars)
-	resolvePackageDefs(cfg.Pkgs, vars)
+	return sysInfo, isRoot, vars
+}
 
-	if *debug {
-		logger.Debug("------ FINAL VARIABLES DUMP ------")
-		for k, v := range vars {
-			displayVal := v
-			lowerK := strings.ToLower(k)
-			if shouldMask(lowerK) {
-				if len(v) > 3 {
-					displayVal = v[:3] + "***"
-				} else {
-					displayVal = "***"
-				}
-			}
-			logger.Debug("[%s] = %s", k, displayVal)
-		}
-		logger.Debug("----------------------------------")
+func setupSudoRefresh() {
+	logger.Info("Refreshing sudo credentials...")
+	if err := exec.Command("sudo", "-v").Run(); err != nil {
+		logger.Error("Failed to refresh sudo credentials. Please run as root or ensure sudo works without password.")
 	}
 
+	go func() {
+		ticker := time.NewTicker(4 * time.Minute)
+		for range ticker.C {
+			exec.Command("sudo", "-v").Run()
+		}
+	}()
+}
+
+func dumpVariables(vars map[string]string) {
+	logger.Debug("------ FINAL VARIABLES DUMP ------")
+	for k, v := range vars {
+		displayVal := v
+		lowerK := strings.ToLower(k)
+		if shouldMask(lowerK) {
+			if len(v) > 3 {
+				displayVal = v[:3] + "***"
+			} else {
+				displayVal = "***"
+			}
+		}
+		logger.Debug("[%s] = %s", k, displayVal)
+	}
+	logger.Debug("----------------------------------")
+}
+
+func preparePackageManager(cfg *config.Config, sysInfo *context.SystemInfo, vars map[string]string, isRoot, dryRun bool) *pkgmanager.Engine {
 	scriptDir, err := pkgmanager.Prepare(cfg.Scrpits, vars)
 	if err != nil {
 		logger.Error("Failed to prepare helper scripts: %v", err)
 	}
 
-	// Engine Init
 	pmEngine := pkgmanager.NewEngine(sysInfo, vars, isRoot, dryRun)
 	pmEngine.RegisterCustomPMs(cfg.Pkgs)
 
 	if scriptDir != "" {
-        currentPath := os.Getenv("PATH")
-        newPath := scriptDir + string(os.PathListSeparator) + currentPath
-        pmEngine.Runner.Env["PATH"] = newPath
-        logger.Debug("Injected scripts to PATH: %s", scriptDir)
-    }
-
-	ctx := &taskrunner.Context{
-		Shell:      pmEngine.Runner,
-		PkgManager: pmEngine,
-		Vars:       vars,
-		BaseDir:    baseDir, // Pass the config directory
+		currentPath := os.Getenv("PATH")
+		newPath := scriptDir + string(os.PathListSeparator) + currentPath
+		pmEngine.Runner.Env["PATH"] = newPath
+		logger.Debug("Injected scripts to PATH: %s", scriptDir)
 	}
 
+	return pmEngine
+}
+
+func buildTaskNodes(cfg *config.Config, pmEngine *pkgmanager.Engine) []taskrunner.Node {
 	var nodes []taskrunner.Node
 
 	// 1. Files -> Nodes
 	for i, f := range cfg.Files {
-        id := f.ID
-
-        if id == "" {
-            id = f.Dest
-        }
-
-        if id == "" {
-            id = fmt.Sprintf("file_%d", i)
-        }
+		id := f.ID
+		if id == "" {
+			id = f.Dest
+		}
+		if id == "" {
+			id = fmt.Sprintf("file_%d", i)
+		}
 
 		nodes = append(nodes, &taskrunner.FileNode{
 			File: f,
@@ -189,23 +247,25 @@ func main() {
 		})
 	}
 
-	results := taskrunner.RunGeneric(nodes, ctx)
-	taskrunner.PrintSummary(results, nodes)
-	logger.Success("All build tasks completed")
+	return nodes
 }
 
 func resolveVariables(vars map[string]string) {
 	for pass := 0; pass < 100; pass++ {
 		changed := false
 		for k, v := range vars {
-			if len(v) < 3 { continue }
+			if len(v) < 3 {
+				continue
+			}
 
 			if !bytes.Contains([]byte(v), []byte("{{")) {
 				continue
 			}
 
 			tmpl, err := template.New("var").Parse(v)
-			if err != nil { continue }
+			if err != nil {
+				continue
+			}
 
 			var buf bytes.Buffer
 			data := map[string]interface{}{"vars": vars}
@@ -218,7 +278,9 @@ func resolveVariables(vars map[string]string) {
 				}
 			}
 		}
-		if !changed { break }
+		if !changed {
+			break
+		}
 	}
 }
 
@@ -226,9 +288,13 @@ func resolvePackageDefs(pkgs []config.Package, vars map[string]string) {
 	data := map[string]interface{}{"vars": vars}
 
 	render := func(s string) string {
-		if !bytes.Contains([]byte(s), []byte("{{")) { return s }
+		if !bytes.Contains([]byte(s), []byte("{{")) {
+			return s
+		}
 		tmpl, err := template.New("p").Parse(s)
-		if err != nil { return s }
+		if err != nil {
+			return s
+		}
 		var buf bytes.Buffer
 		if err := tmpl.Execute(&buf, data); err == nil {
 			return buf.String()

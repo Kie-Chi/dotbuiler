@@ -52,6 +52,7 @@ type Node interface {
 	
 	Execute(ctx *Context) error
 	BatchGroup() string
+	Group() string
 }
 
 type BatchableNode interface {

@@ -49,6 +49,7 @@ type Package struct {
 	// Maintenance
 	Upd   string `yaml:"upd"`
 	Clean string `yaml:"clean"`
+	Group string `yaml:"group"`
 }
 
 func mergeConfigs(base, incoming *Config) {
@@ -123,6 +124,7 @@ type File struct {
     OverrideIf  string      `yaml:"override_if"`
 	Tpl         bool   	    `yaml:"tpl"`
 	Deps        []string	`yaml:"deps"`
+	Group 		string 		`yaml:"group"`
 }
 
 type Task struct {
@@ -132,6 +134,7 @@ type Task struct {
 	Check string            `yaml:"check"`
 	On    map[string]string `yaml:"on"`
 	Run   string            `yaml:"run"`
+	Group string 			`yaml:"group"`
 }
 
 func loadRecursive(path string, visited map[string]bool) (*Config, error) {
