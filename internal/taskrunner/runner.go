@@ -331,7 +331,7 @@ func RunPhased(nodes []Node, ctx *Context) map[string]NodeResult {
         }
 
         if hasFailure {
-            logger.Error("Stage [%s] failed. Blocking subsequent stages.", stageName)
+            logger.Warn("Stage [%s] failed. Blocking subsequent stages.", stageName)
             previousStageFailed = true
         }
     }
