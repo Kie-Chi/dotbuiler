@@ -315,7 +315,7 @@ func RunPhased(nodes []Node, ctx *Context) map[string]NodeResult {
                 allResults[n.ID()] = NodeResult{
                     ID:     n.ID(),
                     Status: StatusBlocked,
-                    Error:  fmt.Errorf("blocked by failure in previous stage"),
+                    Error:  fmt.Errorf("Failure in previous stage"),
                 }
             }
             continue
