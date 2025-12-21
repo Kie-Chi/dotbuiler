@@ -105,7 +105,12 @@ func (r *Runner) ExecSilent(cmdStr string) int {
 		cmd.Env = append(cmd.Env, k+"="+v)
 	}
 
-	if err := cmd.Run(); err != nil {
+	output, err := cmd.CombinedOutput()
+	if len(output) > 0 {
+		logger.Debug("  -> Check Output: %s", strings.TrimSpace(string(output)))
+	}
+
+	if err != nil {
 		if exitError, ok := err.(*exec.ExitError); ok {
 			return exitError.ExitCode()
 		}
